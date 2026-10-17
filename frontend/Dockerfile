@@ -9,6 +9,8 @@ RUN npm run build
 # Serve stage: unprivileged Nginx (runs as a non-root user, listens on 8080).
 FROM docker.io/nginxinc/nginx-unprivileged:1.27-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Runs before Nginx starts (the image's entrypoint runs /docker-entrypoint.d/*.sh).
+COPY --chmod=755 docker-resolver.sh /docker-entrypoint.d/15-resolver.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
