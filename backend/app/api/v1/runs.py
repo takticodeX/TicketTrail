@@ -3,8 +3,8 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
-from sqlalchemy import func, update
+from fastapi import APIRouter, Query, Response, status
+from sqlalchemy import delete, func, update
 
 from app.api.deps import CurrentUser, DbSession, PageDep, TaskRunnerDep
 from app.api.v1.git_connections import worker_unavailable
@@ -13,6 +13,7 @@ from app.api.v1.schemas import (
     RunDetailResponse,
     RunItemResponse,
     RunResponse,
+    RunsDeleted,
     SyncRequest,
     SyncStarted,
 )
@@ -120,6 +121,47 @@ def cancel_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> RunRespon
     db.commit()
     db.refresh(run)
     return RunResponse.model_validate(run)
+
+
+def _run_active() -> AppError:
+    return AppError(409, "run_active", "This run is still in progress. Cancel it first.")
+
+
+@router.delete("/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Response:
+    """Delete a finished run and its items from the history.
+
+    Safe: whether a comment was posted is recorded in posted_comments, not in the
+    run history, so deleting a run can never cause a comment to be posted again.
+    """
+    run = _get_run(db, user, run_id)
+    if run.status in ACTIVE_STATUSES:
+        raise _run_active()
+    db.delete(run)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/projects/{project_id}/runs")
+def delete_runs(
+    project_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+    dry_run: Annotated[
+        bool | None, Query(description="Only dry runs (true) or only real syncs (false)")
+    ] = None,
+) -> RunsDeleted:
+    """Delete a project's finished runs, for example every dry run. Active runs stay."""
+    if ProjectRepository(db, user.id).get(project_id) is None:
+        raise not_found("Project")
+    statement = delete(SyncRun).where(
+        SyncRun.project_id == project_id, SyncRun.status.not_in(ACTIVE_STATUSES)
+    )
+    if dry_run is not None:
+        statement = statement.where(SyncRun.dry_run.is_(dry_run))
+    deleted = len(db.execute(statement.returning(SyncRun.id)).all())
+    db.commit()
+    return RunsDeleted(deleted=deleted)
 
 
 @router.get("/runs/{run_id}/items")

@@ -3,12 +3,12 @@
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Cookie, Response, status
+from fastapi import APIRouter, Cookie, Depends, Header, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import DbSession, SettingsDep
+from app.api.deps import DbSession, LoginLimiterDep, SettingsDep
 from app.api.v1.schemas import (
     AuthConfigResponse,
     LoginRequest,
@@ -41,6 +41,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 REFRESH_COOKIE = "tt_refresh"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
+CSRF_HEADER_VALUE = "TicketTrail"
 
 
 def _set_refresh_cookie(response: Response, token: str, settings: Settings) -> None:
@@ -111,11 +112,44 @@ def register(body: RegisterRequest, db: DbSession, settings: SettingsDep) -> Use
     return UserResponse.model_validate(user)
 
 
-@router.post("/login")
+def require_csrf_header(x_requested_with: str | None = Header(default=None)) -> None:
+    """CSRF protection for the cookie-authenticated endpoints (spec section 10).
+
+    Another site can make a browser send the refresh cookie, but it cannot add a
+    custom header without a CORS preflight, which this API never grants.
+    SameSite=Strict on the cookie is the first line; this is the second.
+    """
+    if x_requested_with != CSRF_HEADER_VALUE:
+        raise AppError(
+            403, "csrf_failed", f"Missing the X-Requested-With: {CSRF_HEADER_VALUE} header."
+        )
+
+
+@router.post(
+    "/login",
+    responses={429: {"model": ErrorResponse, "description": "Too many login attempts"}},
+)
 def login(
-    body: LoginRequest, response: Response, db: DbSession, settings: SettingsDep
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    db: DbSession,
+    settings: SettingsDep,
+    limiter: LoginLimiterDep,
 ) -> TokenResponse:
-    """Returns an access token and sets the refresh token as an httpOnly cookie."""
+    """Returns an access token and sets the refresh token as an httpOnly cookie.
+
+    At most 5 attempts a minute per IP address and per email.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    retry_after = limiter.hit(client_ip, body.email)
+    if retry_after is not None:
+        raise AppError(
+            429,
+            "too_many_attempts",
+            "Too many login attempts. Wait a minute and try again.",
+            headers={"Retry-After": str(retry_after)},
+        )
     user = UserRepository(db).get_by_email(body.email)
     if user is None:
         burn_password_check(body.password)
@@ -136,6 +170,7 @@ def login(
     "/refresh",
     response_model=TokenResponse,
     responses={401: {"model": ErrorResponse, "description": "Missing or invalid refresh token"}},
+    dependencies=[Depends(require_csrf_header)],
 )
 def refresh(
     response: Response,
@@ -195,7 +230,11 @@ def refresh(
     return tokens
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_csrf_header)],
+)
 def logout(
     db: DbSession,
     settings: SettingsDep,

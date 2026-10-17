@@ -2,7 +2,16 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, azure_connections, git_connections, health, me, projects, runs
+from app.api.v1 import (
+    admin,
+    auth,
+    azure_connections,
+    git_connections,
+    health,
+    me,
+    projects,
+    runs,
+)
 from app.core.errors import ErrorResponse
 
 _ERRORS: dict[int | str, dict[str, Any]] = {
@@ -36,6 +45,13 @@ _CONNECTION_ERRORS = {
 api_router.include_router(git_connections.router, responses=_CONNECTION_ERRORS)
 api_router.include_router(azure_connections.router, responses=_CONNECTION_ERRORS)
 api_router.include_router(projects.router, responses=_RESOURCE_ERRORS)
+api_router.include_router(
+    admin.router,
+    responses={
+        **_RESOURCE_ERRORS,
+        403: {"model": ErrorResponse, "description": "Not an administrator"},
+    },
+)
 api_router.include_router(
     runs.router,
     responses={

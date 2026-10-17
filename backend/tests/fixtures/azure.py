@@ -85,6 +85,9 @@ class FakeAzure:
 def fake_azure() -> Iterator[FakeAzure]:
     azure = FakeAzure()
     with respx.mock(assert_all_called=False) as router:
+        router.get(f"{ORG}/_apis/projects/{PROJECT}").mock(  # Test connection
+            return_value=httpx.Response(200, json={"id": "p", "name": PROJECT})
+        )
         router.get(f"{ORG}/{PROJECT}/_apis/wit/workitems").mock(side_effect=azure._work_items)
         router.post(url__regex=_COMMENTS.pattern).mock(side_effect=azure._post_comment)
         router.get(url__regex=_COMMENTS.pattern).mock(side_effect=azure._list_comments)

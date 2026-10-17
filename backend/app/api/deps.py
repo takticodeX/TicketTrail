@@ -12,6 +12,7 @@ from app.api.v1.schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.config import Settings
 from app.core.crypto import SecretBox
 from app.core.errors import AppError
+from app.core.ratelimit import LoginRateLimiter
 from app.core.security import TokenError, TokenExpiredError, decode_token
 from app.db.models import User
 from app.db.repositories import UserRepository
@@ -36,10 +37,15 @@ def get_task_runner(request: Request) -> TaskRunner:
     return cast(TaskRunner, request.app.state.task_runner)
 
 
+def get_login_limiter(request: Request) -> LoginRateLimiter:
+    return cast(LoginRateLimiter, request.app.state.login_limiter)
+
+
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 DbSession = Annotated[Session, Depends(get_db)]
 SecretBoxDep = Annotated[SecretBox, Depends(get_secret_box)]
 TaskRunnerDep = Annotated[TaskRunner, Depends(get_task_runner)]
+LoginLimiterDep = Annotated[LoginRateLimiter, Depends(get_login_limiter)]
 
 
 @dataclass(frozen=True)
@@ -93,3 +99,12 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_admin_user(user: CurrentUser) -> User:
+    if not user.is_admin:
+        raise AppError(403, "forbidden", "Only administrators can do this.")
+    return user
+
+
+AdminUser = Annotated[User, Depends(get_admin_user)]

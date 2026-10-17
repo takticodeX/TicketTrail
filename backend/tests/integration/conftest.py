@@ -19,10 +19,12 @@ from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
 from app.config import Settings
+from app.core.ratelimit import LoginRateLimiter
 from app.main import create_app
 from app.worker.context import WorkerContext
 from tests.fixtures.azure import FakeAzure, fake_azure
 from tests.integration.fakes import InProcessTaskRunner
+from tests.integration.helpers import BROWSER_HEADERS
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 POSTGRES_IMAGE = "docker.io/library/postgres:16-alpine"
@@ -136,6 +138,9 @@ def app_factory(
             )
         )
         app.state.sleeps = sleeps
+        # The API's own Redis points at a closed port (to test /ready); the login limit
+        # uses the real one.
+        app.state.login_limiter = LoginRateLimiter(redis)
         created.append(app)
         return app
 
@@ -151,5 +156,6 @@ def app(app_factory: Callable[..., FastAPI]) -> FastAPI:
 
 @pytest.fixture
 def client(app: FastAPI) -> Iterator[TestClient]:
-    with TestClient(app) as test_client:
+    # The browser app sends this header on every call; refresh and logout require it.
+    with TestClient(app, headers=BROWSER_HEADERS) as test_client:
         yield test_client

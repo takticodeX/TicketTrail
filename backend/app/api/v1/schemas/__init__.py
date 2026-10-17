@@ -1,6 +1,8 @@
 """Request and response schemas for the v1 API."""
 
 from app.api.v1.schemas.auth import (
+    AdminUserResponse,
+    AdminUserUpdate,
     AuthConfigResponse,
     HealthResponse,
     LoginRequest,
@@ -33,6 +35,7 @@ from app.api.v1.schemas.runs import (
     RunDetailResponse,
     RunItemResponse,
     RunResponse,
+    RunsDeleted,
     SyncRequest,
     SyncStarted,
 )
@@ -40,6 +43,8 @@ from app.api.v1.schemas.runs import (
 __all__ = [
     "DEFAULT_PAGE_SIZE",
     "MAX_PAGE_SIZE",
+    "AdminUserResponse",
+    "AdminUserUpdate",
     "AuthConfigResponse",
     "AzureConnectionCreate",
     "AzureConnectionResponse",
@@ -63,6 +68,7 @@ __all__ = [
     "RunDetailResponse",
     "RunItemResponse",
     "RunResponse",
+    "RunsDeleted",
     "SyncRequest",
     "SyncStarted",
     "TokenResponse",

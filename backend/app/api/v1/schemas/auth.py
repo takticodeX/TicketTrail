@@ -96,6 +96,16 @@ class UserUpdateRequest(BaseModel):
         return self
 
 
+class AdminUserResponse(UserResponse):
+    projects: int = Field(description="Number of projects the user owns")
+
+
+class AdminUserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    is_active: bool
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"]
 

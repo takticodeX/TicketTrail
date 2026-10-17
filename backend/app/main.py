@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.core.crypto import SecretBox
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
+from app.core.ratelimit import LoginRateLimiter
 from app.db.session import create_db_engine, create_session_factory
 from app.worker.celery_factory import create_celery_app
 from app.worker.runner import CeleryTaskRunner
@@ -43,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = create_session_factory(engine)
     app.state.redis = redis
     app.state.secret_box = SecretBox.from_settings(settings)
+    app.state.login_limiter = LoginRateLimiter(redis)
     # The API never runs Git or Azure calls itself; the worker does (spec section 3).
     app.state.task_runner = CeleryTaskRunner(create_celery_app(settings))
 

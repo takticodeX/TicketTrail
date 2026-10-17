@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 PASSWORD = "correct-horse-battery"
+# What the frontend sends on every request (CSRF protection on refresh and logout).
+BROWSER_HEADERS = {"X-Requested-With": "TicketTrail"}
 
 
 def register(client: TestClient, email: str, password: str = PASSWORD, **extra: Any) -> Any:
@@ -30,13 +32,13 @@ def refresh_with(app: FastAPI, refresh_token: str) -> Any:
 
     No `with` block: that would run the app's shutdown and dispose the shared engine.
     """
-    other = TestClient(app)
+    other = TestClient(app, headers=BROWSER_HEADERS)
     return other.post("/api/v1/auth/refresh", headers={"Cookie": f"tt_refresh={refresh_token}"})
 
 
 def new_client(app: FastAPI) -> TestClient:
     """A second browser/device for the same app (see refresh_with about `with`)."""
-    return TestClient(app)
+    return TestClient(app, headers=BROWSER_HEADERS)
 
 
 def signed_in(client: TestClient, email: str) -> dict[str, str]:

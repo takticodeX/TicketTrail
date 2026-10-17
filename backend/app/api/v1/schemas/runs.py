@@ -20,6 +20,10 @@ class SyncStarted(BaseModel):
     run_id: uuid.UUID
 
 
+class RunsDeleted(BaseModel):
+    deleted: int
+
+
 class RunResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -22,6 +22,17 @@ def test_wrong_key_cannot_decrypt() -> None:
         SecretBox(Fernet.generate_key().decode()).decrypt(ciphertext)
 
 
+def test_old_key_still_decrypts_during_rotation() -> None:
+    old, new = Fernet.generate_key().decode(), Fernet.generate_key().decode()
+    ciphertext = SecretBox(old).encrypt("secret")
+    box = SecretBox(new, old)
+    assert box.decrypt(ciphertext) == "secret"
+    rotated = box.rotate(ciphertext)
+    assert SecretBox(new).decrypt(rotated) == "secret"  # the old key is no longer needed
+    with pytest.raises(SecretDecryptionError):
+        SecretBox(old).decrypt(rotated)
+
+
 def test_garbage_cannot_decrypt() -> None:
     with pytest.raises(SecretDecryptionError):
         SecretBox(Fernet.generate_key().decode()).decrypt("not-a-token")
