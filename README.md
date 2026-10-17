@@ -3,10 +3,10 @@
 TicketTrail reads commits from a Git repository and posts each commit message as a comment
 on the Azure DevOps work item it references. See [SPEC.md](SPEC.md) for the full design.
 
-> Status: Milestone 4. Accounts, connections and projects are set up under **Settings**.
-> A project's **Dry run** lists every commit with the work items it references, without
-> touching Azure DevOps. Posting arrives in Milestone 5, schedules in Milestone 6, and a
-> full setup and operations guide in Milestone 7.
+> Status: Milestone 5. Accounts, connections and projects are set up under **Settings**.
+> On a project's page, **Dry run** shows what would be posted, and **Sync now** posts one
+> comment per commit and work item to Azure DevOps, never twice. Schedules arrive in
+> Milestone 6, and a full setup and operations guide in Milestone 7.
 
 Connection tests run on the worker and refuse hosts on private networks. To use a Git
 server on your LAN, set `TT_ALLOW_PRIVATE_HOSTS=true` in `.env`.
