@@ -36,6 +36,38 @@ def test_mirror_clones_then_fetches(origin: FixtureRepo, client: GitClient, mirr
     assert not mirror.with_name("project-1.partial").exists()
 
 
+def _refs(mirror: Path) -> list[str]:
+    import subprocess
+
+    out = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname)"], cwd=mirror, capture_output=True, check=True
+    )
+    return sorted(out.stdout.decode().split())
+
+
+def test_only_branches_are_copied(origin: FixtureRepo, client: GitClient, mirror: Path) -> None:
+    sha = origin.commit("first")
+    origin.git("update-ref", "refs/pull/1/head", sha)  # what GitHub keeps for every PR
+    origin.git("tag", "v1.0")
+    client.mirror(origin.url, mirror)
+    assert _refs(mirror) == ["refs/heads/main"]
+
+
+def test_fetch_adds_new_branches_and_prunes_deleted_ones(
+    origin: FixtureRepo, client: GitClient, mirror: Path
+) -> None:
+    origin.commit("first")
+    origin.checkout("old", create=True)
+    client.mirror(origin.url, mirror)
+    assert _refs(mirror) == ["refs/heads/main", "refs/heads/old"]
+
+    origin.checkout("new", create=True)
+    origin.git("branch", "-D", "old")
+    origin.git("update-ref", "refs/pull/2/head", origin.head())
+    client.mirror(origin.url, mirror)
+    assert _refs(mirror) == ["refs/heads/main", "refs/heads/new"]
+
+
 def test_failed_clone_leaves_no_mirror(tmp_path: Path, client: GitClient, mirror: Path) -> None:
     with pytest.raises(GitNotFoundError):
         client.mirror((tmp_path / "missing").as_uri(), mirror)

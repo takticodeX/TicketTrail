@@ -59,6 +59,8 @@ class Commit:
 _FIELD = "\x00"
 _RECORD_END = "\x1e"
 _LOG_FORMAT = "%H%x00%an%x00%ae%x00%aI%x00%cI%x00%P%x00%B%x1e"
+# Branches only, force-updated, so a rewritten branch replaces the old one.
+_BRANCH_REFSPEC = "+refs/heads/*:refs/heads/*"
 
 
 def _parse_commit(record: str) -> Commit:
@@ -225,7 +227,14 @@ class GitClient:
     # --- Local mirror ----------------------------------------------------------------------
 
     def mirror(self, url: str, path: Path) -> None:
-        """Mirror-clone the remote into `path` the first time, then only fetch."""
+        """Keep a bare copy of the remote's branches in `path`: clone once, then fetch.
+
+        Not `clone --mirror`: that also fetches every other ref, such as GitHub's
+        refs/pull/* (often thousands of pull requests, gigabytes for a small repo).
+        Only branches are fetched (force-updated, pruned), and only commits and
+        trees: reading commit messages needs no file contents. Servers that don't
+        support partial clone ignore the filter.
+        """
         if (path / "HEAD").is_file():
             self._run("remote", "set-url", "origin", url, cwd=path)  # the URL may have changed
             self._run("fetch", "--prune", "--quiet", "origin", cwd=path)
@@ -234,8 +243,12 @@ class GitClient:
         partial = path.with_name(path.name + ".partial")
         if partial.exists():
             shutil.rmtree(partial)
-        self._run("clone", "--mirror", "--quiet", url, str(partial))
-        partial.rename(path)  # never leave a half-cloned mirror at the real path
+        self._run(
+            "clone", "--bare", "--quiet", "--no-tags", "--filter=blob:none", url, str(partial)
+        )
+        self._run("config", "remote.origin.fetch", _BRANCH_REFSPEC, cwd=partial)
+        self._run("config", "remote.origin.tagOpt", "--no-tags", cwd=partial)
+        partial.rename(path)  # never leave a half-cloned copy at the real path
 
     def has_branch(self, path: Path, branch: str) -> bool:
         return self._succeeds(
