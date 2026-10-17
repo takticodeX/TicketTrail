@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
-import { jsonResponse, mockFetch, renderWithProviders } from '../test/utils';
+import { authValue, jsonResponse, mockFetch, renderWithProviders } from '../test/utils';
 import { LoginPage } from './LoginPage';
 import { RegisterPage } from './RegisterPage';
 
@@ -15,13 +15,9 @@ const login = vi.fn();
 const registerAccount = vi.fn();
 
 beforeEach(() => {
-  vi.mocked(useAuth).mockReturnValue({
-    status: 'anonymous',
-    user: null,
-    login,
-    register: registerAccount,
-    logout: vi.fn(),
-  });
+  vi.mocked(useAuth).mockReturnValue(
+    authValue({ status: 'anonymous', user: null, login, register: registerAccount }),
+  );
 });
 afterEach(() => vi.unstubAllGlobals());
 

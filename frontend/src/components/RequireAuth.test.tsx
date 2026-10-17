@@ -3,19 +3,13 @@ import { Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import { useAuth, type AuthContextValue } from '../hooks/useAuth';
-import { renderWithProviders } from '../test/utils';
+import { authValue, renderWithProviders } from '../test/utils';
 import { RedirectIfAuthenticated, RequireAuth } from './RequireAuth';
 
 vi.mock('../hooks/useAuth', () => ({ useAuth: vi.fn() }));
 
 function mockStatus(status: AuthContextValue['status']) {
-  vi.mocked(useAuth).mockReturnValue({
-    status,
-    user: null,
-    login: vi.fn(),
-    register: vi.fn(),
-    logout: vi.fn(),
-  });
+  vi.mocked(useAuth).mockReturnValue(authValue({ status, user: null }));
 }
 
 function renderRoutes(route: string) {

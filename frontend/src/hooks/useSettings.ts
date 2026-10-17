@@ -1,0 +1,99 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
+import * as api from '../api/settings';
+import type { AzureConnectionInput, GitConnectionInput, ProjectInput } from '../api/types';
+
+export const settingsKeys = {
+  git: ['git-connections'] as const,
+  azure: ['azure-connections'] as const,
+  projects: ['projects'] as const,
+  project: (id: string) => ['projects', id] as const,
+};
+
+export function useGitConnections() {
+  return useQuery({ queryKey: settingsKeys.git, queryFn: api.listGitConnections });
+}
+
+export function useAzureConnections() {
+  return useQuery({ queryKey: settingsKeys.azure, queryFn: api.listAzureConnections });
+}
+
+export function useProjects() {
+  return useQuery({ queryKey: settingsKeys.projects, queryFn: api.listProjects });
+}
+
+export function useProject(id: string | undefined) {
+  return useQuery({
+    queryKey: settingsKeys.project(id ?? ''),
+    queryFn: () => api.getProject(id ?? ''),
+    enabled: Boolean(id),
+  });
+}
+
+export function useSaveGitConnection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: GitConnectionInput }) =>
+      id ? api.updateGitConnection(id, body) : api.createGitConnection(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.git }),
+  });
+}
+
+export function useDeleteGitConnection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteGitConnection,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.git }),
+  });
+}
+
+export function useTestGitConnection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.testGitConnection,
+    // The test records last_test_ok on the connection.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: settingsKeys.git }),
+  });
+}
+
+export function useSaveAzureConnection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: AzureConnectionInput }) =>
+      id ? api.updateAzureConnection(id, body) : api.createAzureConnection(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.azure }),
+  });
+}
+
+export function useDeleteAzureConnection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteAzureConnection,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.azure }),
+  });
+}
+
+export function useTestAzureConnection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.testAzureConnection,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: settingsKeys.azure }),
+  });
+}
+
+export function useSaveProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: ProjectInput }) =>
+      id ? api.updateProject(id, body) : api.createProject(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.projects }),
+  });
+}
+
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteProject,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.projects }),
+  });
+}

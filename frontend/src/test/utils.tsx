@@ -6,6 +6,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
 
 import { ROUTER_FUTURE } from '../App';
+import type { User } from '../api/types';
+import type { AuthContextValue } from '../hooks/useAuth';
 import { theme } from '../theme';
 
 export function renderWithProviders(
@@ -23,6 +25,29 @@ export function renderWithProviders(
     </MantineProvider>
   );
   return render(ui, { wrapper: Wrapper });
+}
+
+export const testUser: User = {
+  id: 'u1',
+  email: 'alice@example.com',
+  display_name: 'Alice',
+  timezone: 'Europe/Rome',
+  role: 'admin',
+  is_active: true,
+  created_at: '2026-10-15T10:00:00Z',
+};
+
+/** A full auth context value for tests that mock useAuth. */
+export function authValue(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
+  return {
+    status: 'authenticated',
+    user: testUser,
+    login: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+    updateUser: vi.fn(),
+    ...overrides,
+  };
 }
 
 export function jsonResponse(body: unknown, status = 200): Response {

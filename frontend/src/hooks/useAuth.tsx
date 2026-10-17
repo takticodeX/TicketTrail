@@ -21,6 +21,8 @@ export interface AuthContextValue {
   login: (payload: LoginPayload) => Promise<void>;
   register: (payload: RegisterPayload) => Promise<void>;
   logout: () => Promise<void>;
+  /** Replace the signed-in user after a profile change. */
+  updateUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -91,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [signOutLocally]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, login, register, logout }),
+    () => ({ status, user, login, register, logout, updateUser: setUser }),
     [status, user, login, register, logout],
   );
 

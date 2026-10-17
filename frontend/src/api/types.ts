@@ -33,6 +33,107 @@ export interface RegisterPayload {
   display_name?: string;
 }
 
+export interface UserUpdate {
+  display_name?: string;
+  timezone?: string;
+  current_password?: string;
+  new_password?: string;
+}
+
+export interface Page<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export type GitAuthType = 'token' | 'basic' | 'none';
+export type GitHost = 'azure_repos' | 'github' | 'gitlab' | 'bitbucket' | 'generic';
+
+export interface GitConnection {
+  id: string;
+  name: string;
+  repo_url: string;
+  auth_type: GitAuthType;
+  username: string | null;
+  has_secret: boolean;
+  commit_url_template: string | null;
+  /** The commit link actually used, with a {sha} placeholder; "" for unknown hosts. */
+  commit_url_pattern: string;
+  host: GitHost;
+  last_test_at: string | null;
+  last_test_ok: boolean | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitConnectionInput {
+  name: string;
+  repo_url: string;
+  auth_type: GitAuthType;
+  username: string | null;
+  /** Write-only. Omit or send "" to keep the saved secret. */
+  secret?: string;
+  commit_url_template: string | null;
+}
+
+export interface GitTestResult {
+  ok: boolean;
+  branches: string[];
+  default_branch: string | null;
+  error: string | null;
+}
+
+export interface AzureConnection {
+  id: string;
+  name: string;
+  organization_url: string;
+  azure_project: string;
+  has_secret: boolean;
+  last_test_at: string | null;
+  last_test_ok: boolean | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AzureConnectionInput {
+  name: string;
+  organization_url: string;
+  azure_project: string;
+  /** Write-only. Omit or send "" to keep the saved PAT. */
+  pat?: string;
+}
+
+export interface AzureTestResult {
+  ok: boolean;
+  project_name: string | null;
+  error: string | null;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  git_connection_id: string;
+  azure_connection_id: string;
+  branches: string[];
+  ticket_pattern: string;
+  comment_template: string;
+  start_from: string | null;
+  include_merge_commits: boolean;
+  schedule_cron: string | null;
+  schedule_enabled: boolean;
+  dry_run_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProjectInput = Omit<Project, 'id' | 'created_at' | 'updated_at'>;
+
+export interface PatternTestResponse {
+  pattern: string;
+  results: { ids: number[]; error: string | null }[];
+}
+
 export interface ErrorBody {
   error: {
     code: string;

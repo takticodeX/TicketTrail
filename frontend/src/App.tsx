@@ -6,6 +6,11 @@ import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { AzureConnectionsPage } from './pages/settings/AzureConnectionsPage';
+import { GitConnectionsPage } from './pages/settings/GitConnectionsPage';
+import { ProfilePage } from './pages/settings/ProfilePage';
+import { ProjectsPage } from './pages/settings/ProjectsPage';
+import { ProjectWizardPage } from './pages/settings/ProjectWizardPage';
 
 /** Opt in to React Router v7 behaviour now, so the later upgrade is a no-op. */
 export const ROUTER_FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
@@ -38,6 +43,15 @@ export function AppRoutes() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="dashboard" element={<Navigate to="/" replace />} />
+        <Route path="settings">
+          <Route index element={<Navigate to="/settings/projects" replace />} />
+          <Route path="projects" element={<ProjectsPage />} />
+          <Route path="projects/new" element={<ProjectWizardPage />} />
+          <Route path="projects/:projectId" element={<ProjectWizardPage />} />
+          <Route path="git" element={<GitConnectionsPage />} />
+          <Route path="azure" element={<AzureConnectionsPage />} />
+          <Route path="profile" element={<ProfilePage />} />
+        </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

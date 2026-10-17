@@ -7,6 +7,20 @@ const apiTarget = process.env.VITE_API_PROXY ?? 'http://127.0.0.1:8000';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // Large libraries in their own chunks, cached separately from app code.
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          mantine: ['@mantine/core', '@mantine/hooks', '@mantine/modals', '@mantine/notifications'],
+          forms: ['react-hook-form', '@hookform/resolvers', 'zod', '@tanstack/react-query'],
+          markdown: ['react-markdown'],
+          cron: ['cron-parser', 'cronstrue'],
+        },
+      },
+    },
+  },
   server: {
     port: 8080,
     host: true,
