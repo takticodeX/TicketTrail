@@ -168,8 +168,14 @@ class AzureBoardsClient:
             }
             try:
                 body = self._json("GET", url, params=params)
-            except TrackerNotFoundError:
-                continue  # every ID in the batch is missing
+            except TrackerNotFoundError as exc:
+                # With errorPolicy=omit a missing work item comes back as null in a 200.
+                # A 404 for the whole request means the organization or project is wrong:
+                # treating that as "every item is missing" would skip them all for good.
+                raise TrackerError(
+                    f"Project {self._project!r} was not found in this organization. "
+                    "Check the Azure connection in Settings."
+                ) from exc
             for item in body.get("value", []) if isinstance(body, dict) else []:
                 if isinstance(item, dict) and isinstance(item.get("id"), int):
                     found.add(item["id"])

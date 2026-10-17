@@ -72,6 +72,17 @@ def test_no_ids_means_no_request(azure: AzureBoardsClient) -> None:
 
 
 @respx.mock
+def test_existence_check_on_a_wrong_project_fails_instead_of_skipping(
+    azure: AzureBoardsClient,
+) -> None:
+    # Found live: an unknown organization or project answers 404 for the whole request.
+    respx.get(ITEMS).mock(return_value=httpx.Response(404))
+    with pytest.raises(TrackerError, match="was not found in this organization") as exc:
+        azure.existing_work_items([1, 2])
+    assert not isinstance(exc.value, TrackerNotFoundError)
+
+
+@respx.mock
 def test_existence_check_with_bad_pat(azure: AzureBoardsClient) -> None:
     respx.get(ITEMS).mock(return_value=httpx.Response(401))
     with pytest.raises(TrackerAuthError):

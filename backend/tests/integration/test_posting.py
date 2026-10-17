@@ -384,6 +384,22 @@ def test_401_while_posting_stops_without_a_stray_guard(
     assert rows == [(1, "posted")]  # the refused pair has no guard: it will be posted later
 
 
+def test_wrong_azure_project_fails_and_keeps_the_cursor(
+    client: TestClient,
+    headers: dict[str, str],
+    origin: FixtureRepo,
+    project_for: Any,
+    board: FakeAzure,
+    db_engine: Engine,
+) -> None:
+    origin.commit("AB#1")
+    board.next_reads.append(httpx.Response(404))  # unknown organization or project
+    run = sync(client, headers, project_for(origin))
+    assert run["status"] == "failed"
+    assert "was not found in this organization" in run["error_message"]
+    assert cursors(db_engine) == {}  # the commits are still to be posted later
+
+
 def test_missing_work_item_is_skipped(
     client: TestClient,
     headers: dict[str, str],
