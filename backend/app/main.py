@@ -9,9 +9,12 @@ from redis import Redis
 from app import __version__
 from app.api.v1.router import api_router
 from app.config import Settings, get_settings
+from app.core.crypto import SecretBox
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.db.session import create_db_engine, create_session_factory
+from app.worker.celery_factory import create_celery_app
+from app.worker.runner import CeleryTaskRunner
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -39,6 +42,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
     app.state.redis = redis
+    app.state.secret_box = SecretBox.from_settings(settings)
+    # The API never runs Git or Azure calls itself; the worker does (spec section 3).
+    app.state.task_runner = CeleryTaskRunner(create_celery_app(settings))
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix="/api/v1")

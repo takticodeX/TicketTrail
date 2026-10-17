@@ -4,8 +4,8 @@ import uuid
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import DateTime, MetaData, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import DateTime, ForeignKey, MetaData, String, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 
 # Stable constraint names, so Alembic migrations stay predictable.
 NAMING_CONVENTION = {
@@ -30,3 +30,15 @@ class TimestampedModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class OwnedModel(TimestampedModel):
+    """A named row that belongs to one user. Repositories filter every query on owner_id."""
+
+    __abstract__ = True
+
+    name: Mapped[str] = mapped_column(String(100))
+
+    @declared_attr
+    def owner_id(cls) -> Mapped[uuid.UUID]:  # noqa: N805  (SQLAlchemy declared_attr)
+        return mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

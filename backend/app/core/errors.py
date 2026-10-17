@@ -40,6 +40,21 @@ class AppError(Exception):
         self.headers = headers
 
 
+def not_found(what: str) -> AppError:
+    """Also used for rows another user owns, so their IDs don't leak (spec section 8)."""
+    return AppError(404, "not_found", f"{what} not found.")
+
+
+def field_error(field: str, message: str) -> AppError:
+    """A 422 shaped like FastAPI's own validation errors, for checks that need the database."""
+    return AppError(
+        422,
+        "validation_error",
+        "The request is invalid.",
+        {"errors": [{"loc": ["body", field], "msg": message, "type": "value_error"}]},
+    )
+
+
 def error_response(
     status_code: int,
     code: str,

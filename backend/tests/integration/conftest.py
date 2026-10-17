@@ -17,6 +17,8 @@ from sqlalchemy import Engine, create_engine, text
 
 from app.config import Settings
 from app.main import create_app
+from app.worker.context import WorkerContext
+from tests.integration.fakes import InProcessTaskRunner
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 POSTGRES_IMAGE = "docker.io/library/postgres:16-alpine"
@@ -75,6 +77,14 @@ def app_factory(
 
     def factory(**overrides: Any) -> FastAPI:
         app = create_app(make_settings(database_url=migrated_database_url, **overrides))
+        # Run worker tasks in-process against the test database instead of via Redis.
+        app.state.task_runner = InProcessTaskRunner(
+            WorkerContext(
+                settings=app.state.settings,
+                session_factory=app.state.session_factory,
+                secret_box=app.state.secret_box,
+            )
+        )
         created.append(app)
         return app
 
