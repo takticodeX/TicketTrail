@@ -113,6 +113,36 @@ describe('apiRequest', () => {
 });
 
 describe('refreshAccessToken', () => {
+  it('retries once when another tab refreshed first', async () => {
+    const fetchMock = mockFetch({
+      'POST /api/v1/auth/refresh': [
+        errorResponse(401, 'refresh_token_superseded'),
+        jsonResponse(token('from-retry')),
+      ],
+    });
+    await expect(refreshAccessToken()).resolves.toBe('from-retry');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry an invalid refresh token', async () => {
+    const fetchMock = mockFetch({
+      'POST /api/v1/auth/refresh': [errorResponse(401, 'invalid_refresh_token')],
+    });
+    await expect(refreshAccessToken()).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('gives up after one retry', async () => {
+    const fetchMock = mockFetch({
+      'POST /api/v1/auth/refresh': [
+        errorResponse(401, 'refresh_token_superseded'),
+        errorResponse(401, 'refresh_token_superseded'),
+      ],
+    });
+    await expect(refreshAccessToken()).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('returns null when the network fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
     await expect(refreshAccessToken()).resolves.toBeNull();

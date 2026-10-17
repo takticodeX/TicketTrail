@@ -265,8 +265,68 @@ def test_refresh_rotates_the_refresh_token(app: FastAPI, client: TestClient) -> 
 
     replay = refresh_with(app, old_cookie)
     assert replay.status_code == 401
-    assert replay.json()["error"]["code"] == "invalid_refresh_token"
     assert refresh_with(app, new_cookie).status_code == 200
+
+
+def _age_revocations(db_engine: Engine, seconds: int) -> None:
+    """Pretend every revocation happened `seconds` ago."""
+    with Session(db_engine) as session:
+        session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.revoked.is_(True))
+            .values(revoked_at=datetime.now(UTC) - timedelta(seconds=seconds))
+        )
+        session.commit()
+
+
+def test_parallel_refresh_race_keeps_the_session(app: FastAPI, client: TestClient) -> None:
+    """Two tabs refresh with the same cookie: the loser is told to retry, nobody is logged out."""
+    register(client, "a@example.com")
+    login(client, "a@example.com")
+    old_cookie = _refresh_cookie(client)
+    assert client.post("/api/v1/auth/refresh").status_code == 200  # tab A wins
+
+    loser = refresh_with(app, old_cookie)  # tab B, a moment later
+    assert loser.status_code == 401
+    assert loser.json()["error"]["code"] == "refresh_token_superseded"
+    assert "set-cookie" not in loser.headers  # must not wipe tab A's new cookie
+    assert client.post("/api/v1/auth/refresh").status_code == 200  # session still alive
+
+
+def test_reused_refresh_token_revokes_every_session(
+    app: FastAPI, client: TestClient, db_engine: Engine
+) -> None:
+    """An old token showing up later was copied: sign the user out everywhere."""
+    register(client, "a@example.com")
+    other_device = new_client(app)
+    login(other_device, "a@example.com")
+    login(client, "a@example.com")
+    stolen = _refresh_cookie(client)
+    assert client.post("/api/v1/auth/refresh").status_code == 200
+    _age_revocations(db_engine, seconds=31)
+
+    replay = refresh_with(app, stolen)
+    assert replay.status_code == 401
+    assert replay.json()["error"]["code"] == "invalid_refresh_token"
+
+    assert client.post("/api/v1/auth/refresh").status_code == 401
+    assert other_device.post("/api/v1/auth/refresh").status_code == 401
+    login(client, "a@example.com")  # logging in again still works
+
+
+def test_reused_logged_out_token_revokes_every_session(
+    app: FastAPI, client: TestClient, db_engine: Engine
+) -> None:
+    register(client, "a@example.com")
+    login(client, "a@example.com")
+    cookie = _refresh_cookie(client)
+    assert client.post("/api/v1/auth/logout").status_code == 204
+    other_device = new_client(app)
+    login(other_device, "a@example.com")
+    _age_revocations(db_engine, seconds=60)
+
+    assert refresh_with(app, cookie).json()["error"]["code"] == "invalid_refresh_token"
+    assert other_device.post("/api/v1/auth/refresh").status_code == 401
 
 
 def test_refresh_without_cookie_is_rejected_and_clears_cookie(client: TestClient) -> None:

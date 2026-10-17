@@ -13,6 +13,9 @@ from argon2.exceptions import InvalidHashError, VerificationError
 
 ACCESS_TOKEN_TTL = timedelta(minutes=15)
 REFRESH_TOKEN_TTL = timedelta(days=7)
+# How long a just-rotated refresh token may still show up (two tabs refreshing at
+# once) before its reuse is treated as theft.
+REFRESH_REUSE_GRACE = timedelta(seconds=30)
 JWT_ALGORITHM = "HS256"
 
 TokenType = Literal["access", "refresh"]

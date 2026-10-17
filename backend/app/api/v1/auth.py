@@ -1,5 +1,6 @@
 """Registration, login and refresh-token rotation."""
 
+import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Cookie, Response, status
@@ -19,6 +20,7 @@ from app.config import Settings
 from app.core.errors import AppError, ErrorResponse, error_response
 from app.core.security import (
     ACCESS_TOKEN_TTL,
+    REFRESH_REUSE_GRACE,
     REFRESH_TOKEN_TTL,
     TokenError,
     burn_password_check,
@@ -32,6 +34,8 @@ from app.core.security import (
 )
 from app.db.models import User
 from app.db.repositories import RefreshTokenRepository, UserRepository
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -139,7 +143,13 @@ def refresh(
     settings: SettingsDep,
     tt_refresh: str | None = Cookie(default=None, include_in_schema=False),
 ) -> TokenResponse | JSONResponse:
-    """Rotates the refresh cookie: the old token stops working, a new one is set."""
+    """Rotates the refresh cookie: the old token stops working, a new one is set.
+
+    Presenting a token that was revoked more than REFRESH_REUSE_GRACE ago means it
+    was copied, so every session of that user is revoked. Inside the grace window
+    it is the normal race of two tabs refreshing at once: the request is refused
+    without touching the cookie, which the other tab has already replaced.
+    """
 
     def reject() -> JSONResponse:
         # Returned rather than raised, so the cookie-clearing header is kept.
@@ -156,14 +166,30 @@ def refresh(
     except TokenError:
         return reject()
 
-    stored = RefreshTokenRepository(db).get_by_hash_for_update(hash_token(tt_refresh))
-    if stored is None or stored.revoked or stored.expires_at <= datetime.now(UTC):
+    tokens_repo = RefreshTokenRepository(db)
+    stored = tokens_repo.get_by_hash_for_update(hash_token(tt_refresh))
+    now = datetime.now(UTC)
+    if stored is None or stored.expires_at <= now:
+        return reject()
+    if stored.revoked:
+        if stored.revoked_at is not None and now - stored.revoked_at <= REFRESH_REUSE_GRACE:
+            return error_response(
+                401,
+                "refresh_token_superseded",
+                "This session was just refreshed by another request. Retry the refresh.",
+            )
+        logger.warning(
+            "Refresh token reuse detected; revoking all sessions",
+            extra={"user_id": str(stored.user_id)},
+        )
+        tokens_repo.revoke_all_for_user(stored.user_id)
+        db.commit()
         return reject()
     user = UserRepository(db).get(stored.user_id)
     if user is None or not user.is_active:
         return reject()
 
-    stored.revoked = True
+    tokens_repo.revoke(stored)
     tokens = _start_session(db, user, response, settings)
     db.commit()
     return tokens

@@ -54,19 +54,36 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, 'http_error', `Request failed (${response.status}).`);
 }
 
+/** Pause before retrying a refresh that lost the race to another tab. */
+export const SUPERSEDED_RETRY_DELAY_MS = 250;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function postRefresh(): Promise<Response> {
+  return fetch(`${API_BASE}/auth/refresh`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  });
+}
+
 /**
- * Trade the refresh cookie for a new access token. Concurrent callers share one
- * request: the server rotates the cookie on every use, so a second parallel
- * refresh with the old cookie would be rejected.
+ * Trade the refresh cookie for a new access token. Concurrent callers in this tab
+ * share one request: the server rotates the cookie on every use. If another tab
+ * rotated it first, the server answers `refresh_token_superseded`; by then the
+ * browser holds that tab's new cookie, so one retry succeeds.
  */
 export function refreshAccessToken(): Promise<string | null> {
   refreshInFlight ??= (async () => {
     try {
-      const response = await fetch(`${API_BASE}/auth/refresh`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-      });
+      let response = await postRefresh();
+      if (response.status === 401) {
+        const error = await toApiError(response);
+        if (error.code === 'refresh_token_superseded') {
+          await sleep(SUPERSEDED_RETRY_DELAY_MS);
+          response = await postRefresh();
+        }
+      }
       if (!response.ok) {
         setAccessToken(null);
         return null;

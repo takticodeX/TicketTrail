@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -8,6 +8,8 @@ from app.db.models import RefreshToken
 
 
 class RefreshTokenRepository:
+    """Revocation times use the app's clock, the same one the reuse check compares against."""
+
     def __init__(self, session: Session) -> None:
         self.session = session
 
@@ -23,14 +25,20 @@ class RefreshTokenRepository:
             select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update()
         )
 
+    def revoke(self, token: RefreshToken) -> None:
+        token.revoked = True
+        token.revoked_at = datetime.now(UTC)
+
     def revoke_by_hash(self, token_hash: str) -> None:
         self.session.execute(
-            update(RefreshToken).where(RefreshToken.token_hash == token_hash).values(revoked=True)
+            update(RefreshToken)
+            .where(RefreshToken.token_hash == token_hash, RefreshToken.revoked.is_(False))
+            .values(revoked=True, revoked_at=datetime.now(UTC))
         )
 
     def revoke_all_for_user(self, user_id: uuid.UUID) -> None:
         self.session.execute(
             update(RefreshToken)
             .where(RefreshToken.user_id == user_id, RefreshToken.revoked.is_(False))
-            .values(revoked=True)
+            .values(revoked=True, revoked_at=datetime.now(UTC))
         )

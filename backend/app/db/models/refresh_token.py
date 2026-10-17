@@ -18,3 +18,5 @@ class RefreshToken(TimestampedModel):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     expires_at: Mapped[datetime]
     revoked: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # When the token was rotated or revoked; tells a two-tab race apart from a stolen token.
+    revoked_at: Mapped[datetime | None]
