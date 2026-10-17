@@ -13,6 +13,7 @@ from app.db.repositories.sync import (
     SyncRunRepository,
     close_stale_runs,
     other_run_active,
+    project_summaries,
 )
 from app.db.repositories.users import UserRepository
 
@@ -28,4 +29,5 @@ __all__ = [
     "UserRepository",
     "close_stale_runs",
     "other_run_active",
+    "project_summaries",
 ]

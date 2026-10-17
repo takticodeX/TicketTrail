@@ -4,6 +4,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Query, status
+from sqlalchemy import func, update
 
 from app.api.deps import CurrentUser, DbSession, PageDep, TaskRunnerDep
 from app.api.v1.git_connections import worker_unavailable
@@ -15,8 +16,8 @@ from app.api.v1.schemas import (
     SyncRequest,
     SyncStarted,
 )
-from app.core.errors import not_found
-from app.db.models import ItemAction, RunStatus, RunTrigger, SyncRun
+from app.core.errors import AppError, not_found
+from app.db.models import ACTIVE_STATUSES, ItemAction, RunStatus, RunTrigger, SyncRun
 from app.db.repositories import ProjectRepository, SyncRunRepository
 from app.worker import task_names
 from app.worker.runner import WorkerUnavailableError
@@ -85,6 +86,40 @@ def get_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> RunDetailRes
     return RunDetailResponse.model_validate(
         {**RunResponse.model_validate(run).model_dump(), "counts_by_action": counts}
     )
+
+
+@router.post(
+    "/runs/{run_id}/cancel",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={409: {"description": "The run has already finished"}},
+)
+def cancel_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> RunResponse:
+    """Cooperative cancel: a queued run never starts; a running one stops between commits."""
+    run = _get_run(db, user, run_id)
+    # Conditional updates: the worker may be starting the run at this very moment.
+    never_started = db.execute(
+        update(SyncRun)
+        .where(SyncRun.id == run.id, SyncRun.status == RunStatus.QUEUED)
+        .values(
+            status=RunStatus.CANCELLED,
+            cancel_requested=True,
+            finished_at=func.now(),
+            error_message="Cancelled before it started.",
+        )
+        .returning(SyncRun.id)
+    ).first()
+    if never_started is None:
+        flagged = db.execute(
+            update(SyncRun)
+            .where(SyncRun.id == run.id, SyncRun.status.in_(ACTIVE_STATUSES))
+            .values(cancel_requested=True)
+            .returning(SyncRun.id)
+        ).first()
+        if flagged is None:
+            raise AppError(409, "run_finished", "This run has already finished.")
+    db.commit()
+    db.refresh(run)
+    return RunResponse.model_validate(run)
 
 
 @router.get("/runs/{run_id}/items")

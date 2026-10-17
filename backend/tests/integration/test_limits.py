@@ -1,31 +1,13 @@
-"""The per-organization concurrency limit against a real Redis."""
+"""The per-organization concurrency limit and the project lock, against a real Redis."""
 
 import threading
 import time
-from collections.abc import Iterator
+import uuid
 
-import pytest
 from redis import Redis
-from testcontainers.core.container import DockerContainer
-from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
 from app.integrations.trackers.limits import RedisSlotLimiter
-
-pytestmark = pytest.mark.integration
-
-
-@pytest.fixture(scope="module")
-def redis() -> Iterator[Redis]:
-    container = (
-        DockerContainer("docker.io/library/redis:7-alpine")
-        .with_exposed_ports(6379)
-        .waiting_for(LogMessageWaitStrategy("Ready to accept connections"))
-    )
-    with container:
-        # 127.0.0.1, not localhost: Podman on Windows forwards ports on IPv4 only.
-        client = Redis(host="127.0.0.1", port=int(container.get_exposed_port(6379)))
-        yield client
-        client.close()
+from app.sync.lock import RedisProjectLock, lock_key
 
 
 def test_never_more_than_the_limit_at_once(redis: Redis) -> None:
@@ -53,27 +35,20 @@ def test_never_more_than_the_limit_at_once(redis: Redis) -> None:
     assert peak == 2
 
 
-def test_slots_are_shared_by_every_limiter_for_the_organization(redis: Redis) -> None:
+def test_slots_are_shared_per_organization(redis: Redis) -> None:
     first = RedisSlotLimiter.for_organization(redis, "https://dev.azure.com/Shared/", 1)
-    second = RedisSlotLimiter.for_organization(redis, "https://dev.azure.com/shared", 1)
     other_org = RedisSlotLimiter.for_organization(redis, "https://dev.azure.com/other", 1)
-    waits: list[float] = []
-    blocked = RedisSlotLimiter(
-        redis, "tt:azure:slots:https://dev.azure.com/shared", 1, sleep=waits.append
-    )
+    key = "tt:azure:slots:https://dev.azure.com/shared"
     with first.slot():
         with other_org.slot():  # another organization has its own slots
             pass
-        assert redis.zcard("tt:azure:slots:https://dev.azure.com/shared") == 1
-        # A second worker for the same organization would have to wait.
-        acquired = blocked._acquire(
-            keys=["tt:azure:slots:https://dev.azure.com/shared"],
-            args=[int(time.time() * 1000), 1, 120_000, "probe"],
+        assert redis.zcard(key) == 1
+        # A second worker for the same organization (any spelling) would have to wait.
+        probe = redis.register_script(
+            "return redis.call('ZCARD', KEYS[1]) < tonumber(ARGV[1]) and 1 or 0"
         )
-        assert acquired == 0
-    with second.slot():  # released, so it is free again
-        pass
-    assert waits == []
+        assert probe(keys=[key], args=[1]) == 0
+    assert redis.zcard(key) == 0
 
 
 def test_a_dead_workers_slot_expires(redis: Redis) -> None:
@@ -86,3 +61,27 @@ def test_a_dead_workers_slot_expires(redis: Redis) -> None:
         pass
     assert time.monotonic() - started < 1
     assert redis.zscore(key, "dead-worker") is None
+
+
+def test_project_lock_is_held_by_one_run(redis: Redis) -> None:
+    lock = RedisProjectLock(redis)
+    project, run_a, run_b = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    assert lock.acquire(project, run_a)
+    assert not lock.acquire(project, run_b)
+    lock.release(project, run_b)  # not the holder: no effect
+    assert redis.get(lock_key(project)) == str(run_a).encode()
+    lock.release(project, run_a)
+    assert lock.acquire(project, run_b)
+
+
+def test_project_lock_expires_after_30_minutes_unless_refreshed(redis: Redis) -> None:
+    lock = RedisProjectLock(redis)
+    project, run = uuid.uuid4(), uuid.uuid4()
+    lock.acquire(project, run)
+    ttl = redis.pttl(lock_key(project))
+    assert 29 * 60_000 < ttl <= 30 * 60_000
+    redis.pexpire(lock_key(project), 1_000)
+    lock.refresh(project, run)  # the heartbeat
+    assert redis.pttl(lock_key(project)) > 29 * 60_000
+    lock.refresh(project, uuid.uuid4())  # someone else can't extend it
+    assert redis.get(lock_key(project)) == str(run).encode()

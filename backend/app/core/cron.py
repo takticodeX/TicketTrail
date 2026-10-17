@@ -4,6 +4,7 @@ The frontend mirrors these rules in frontend/src/lib/schedule.ts.
 """
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from croniter import croniter
 
@@ -39,3 +40,21 @@ def validate_cron(expression: str, *, min_interval_minutes: int) -> str:
             break
         previous = current
     return normalised
+
+
+def latest_slot(expression: str, timezone: str, now: datetime) -> datetime:
+    """The most recent time (at or before `now`) the schedule was due, in UTC.
+
+    The expression is evaluated in the user's time zone (spec section 7).
+    """
+    local_now = now.astimezone(ZoneInfo(timezone))
+    # croniter's get_prev excludes `now` itself; nudge forward so an exact hit counts.
+    slot: datetime = croniter(expression, local_now + timedelta(seconds=1)).get_prev(datetime)
+    return slot.astimezone(UTC)
+
+
+def next_slot(expression: str, timezone: str, now: datetime) -> datetime:
+    """The next time the schedule is due after `now`, in UTC."""
+    local_now = now.astimezone(ZoneInfo(timezone))
+    slot: datetime = croniter(expression, local_now).get_next(datetime)
+    return slot.astimezone(UTC)

@@ -14,6 +14,7 @@ from app.core.crypto import SecretBox
 from app.db.session import create_db_engine, create_session_factory
 from app.integrations.git.client import DEFAULT_ALLOWED_PROTOCOLS
 from app.integrations.trackers.limits import ConcurrencyLimiter, NoLimit, RedisSlotLimiter
+from app.sync.lock import NoLock, ProjectLock, RedisProjectLock
 
 REPOS_DIR = Path("/data/repos")
 
@@ -31,6 +32,9 @@ class WorkerContext:
     redis: Redis | None = None
     # Waits between Azure retries; tests make it instant.
     sleep: Callable[[float], None] = time.sleep
+
+    def project_lock(self) -> ProjectLock:
+        return NoLock() if self.redis is None else RedisProjectLock(self.redis)
 
     def azure_limiter(self, organization_url: str) -> ConcurrencyLimiter:
         if self.redis is None:

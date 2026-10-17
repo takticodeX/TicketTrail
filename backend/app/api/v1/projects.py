@@ -1,6 +1,8 @@
 """Projects: one Git connection paired with one Azure board, plus the pattern tester."""
 
 import uuid
+from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Response, status
 
@@ -13,15 +15,17 @@ from app.api.v1.schemas import (
     ProjectCreate,
     ProjectResponse,
     ProjectUpdate,
+    RunResponse,
 )
 from app.config import Settings
-from app.core.cron import InvalidCronError, validate_cron
+from app.core.cron import InvalidCronError, next_slot, validate_cron
 from app.core.errors import AppError, field_error, not_found
 from app.db.models import Project
 from app.db.repositories import (
     AzureConnectionRepository,
     GitConnectionRepository,
     ProjectRepository,
+    project_summaries,
 )
 from app.sync.parser import InvalidPatternError, PatternTimeoutError, compile_ticket_pattern
 
@@ -59,11 +63,44 @@ def _check_schedule(project: Project, settings: Settings) -> None:
         raise field_error("schedule_cron", "required when schedule_enabled is true")
 
 
+def _arm_schedule(project: Project) -> None:
+    """A new or changed schedule counts from now: no slot that already passed fires."""
+    project.schedule_last_fired_at = datetime.now(UTC)
+
+
+def _responses(
+    db: DbSession, user: CurrentUser, projects: Sequence[Project]
+) -> list[ProjectResponse]:
+    """Projects with what the dashboard shows: last run, next scheduled run, comments posted."""
+    summaries = project_summaries(db, [p.id for p in projects])
+    now = datetime.now(UTC)
+    responses = []
+    for project in projects:
+        last_run, posted = summaries.get(project.id, (None, 0))
+        next_run_at = None
+        if project.schedule_enabled and project.schedule_cron:
+            next_run_at = next_slot(project.schedule_cron, user.timezone, now)
+        responses.append(
+            ProjectResponse.model_validate(project).model_copy(
+                update={
+                    "last_run": RunResponse.model_validate(last_run) if last_run else None,
+                    "next_run_at": next_run_at,
+                    "comments_posted": posted,
+                }
+            )
+        )
+    return responses
+
+
+def _response(db: DbSession, user: CurrentUser, project: Project) -> ProjectResponse:
+    return _responses(db, user, [project])[0]
+
+
 @router.get("")
 def list_projects(user: CurrentUser, db: DbSession, page: PageDep) -> Page[ProjectResponse]:
     items, total = ProjectRepository(db, user.id).list(offset=page.offset, limit=page.page_size)
     return Page(
-        items=[ProjectResponse.model_validate(p) for p in items],
+        items=_responses(db, user, items),
         total=total,
         page=page.page,
         page_size=page.page_size,
@@ -80,9 +117,10 @@ def create_project(
     _check_connections(db, user, body.git_connection_id, body.azure_connection_id)
     project = Project(**body.model_dump())
     _check_schedule(project, settings)
+    _arm_schedule(project)
     repo.add(project)
     db.commit()
-    return ProjectResponse.model_validate(project)
+    return _response(db, user, project)
 
 
 @router.post("/test-pattern")
@@ -95,7 +133,7 @@ def test_pattern(body: PatternTestRequest, user: CurrentUser) -> PatternTestResp
 
 @router.get("/{project_id}")
 def get_project(project_id: uuid.UUID, user: CurrentUser, db: DbSession) -> ProjectResponse:
-    return ProjectResponse.model_validate(_get_or_404(ProjectRepository(db, user.id), project_id))
+    return _response(db, user, _get_or_404(ProjectRepository(db, user.id), project_id))
 
 
 @router.patch("/{project_id}")
@@ -113,6 +151,7 @@ def update_project(
 
     if body.name is not None and repo.name_taken(body.name, exclude_id=project.id):
         raise _name_taken()
+    schedule_before = (project.schedule_cron, project.schedule_enabled)
     for field in sent:
         value = getattr(body, field)
         if value is None and field not in nullable:
@@ -122,9 +161,11 @@ def update_project(
     if sent & {"git_connection_id", "azure_connection_id"}:
         _check_connections(db, user, project.git_connection_id, project.azure_connection_id)
     _check_schedule(project, settings)
+    if (project.schedule_cron, project.schedule_enabled) != schedule_before:
+        _arm_schedule(project)  # the scheduler reads it at the next minute: no restart
     db.commit()
     db.refresh(project)
-    return ProjectResponse.model_validate(project)
+    return _response(db, user, project)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)

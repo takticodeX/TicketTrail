@@ -539,11 +539,11 @@ def test_stale_runs_are_closed(
     fresh = queue(app, client, headers, project)
 
     with app.state.session_factory() as db:  # a recent heartbeat: not stale yet
-        assert close_stale_runs(db, older_than=timedelta(minutes=10)) == 0
+        assert close_stale_runs(db, older_than=timedelta(minutes=10)) == []
 
     age_runs(db_engine)
     with app.state.session_factory() as db:  # what the worker does when it starts
-        assert close_stale_runs(db, older_than=timedelta(minutes=10)) == 2
+        assert len(close_stale_runs(db, older_than=timedelta(minutes=10))) == 2
         db.commit()
     for run_id in (stuck, fresh):
         run = client.get(f"/api/v1/runs/{run_id}", headers=headers).json()

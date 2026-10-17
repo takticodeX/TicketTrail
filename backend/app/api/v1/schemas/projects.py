@@ -8,6 +8,7 @@ from typing import Annotated, Self
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from app.api.v1.schemas.common import Name
+from app.api.v1.schemas.runs import RunResponse
 from app.core.cron import InvalidCronError, validate_cron
 from app.sync.parser import (
     DEFAULT_TICKET_PATTERN,
@@ -146,6 +147,12 @@ class ProjectResponse(BaseModel):
     dry_run_default: bool
     created_at: datetime
     updated_at: datetime
+    # For the dashboard cards.
+    last_run: RunResponse | None = None
+    next_run_at: datetime | None = Field(
+        default=None, description="Next scheduled run (UTC), if the schedule is on"
+    )
+    comments_posted: int = Field(default=0, description="Comments posted for this project so far")
 
 
 class PatternTestRequest(BaseModel):

@@ -132,8 +132,11 @@ def close_stale_runs(
     older_than: timedelta,
     project_id: uuid.UUID | None = None,
     exclude: uuid.UUID | None = None,
-) -> int:
-    """Fail queued or running runs whose heartbeat stopped. Returns how many."""
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """Fail queued or running runs whose heartbeat stopped.
+
+    Returns (run_id, project_id) for each, so their project locks can be cleared.
+    """
     statement = (
         update(SyncRun)
         .where(
@@ -150,8 +153,33 @@ def close_stale_runs(
         statement = statement.where(SyncRun.project_id == project_id)
     if exclude is not None:
         statement = statement.where(SyncRun.id != exclude)
-    result = session.execute(statement)
-    return int(getattr(result, "rowcount", 0) or 0)
+    rows = session.execute(statement.returning(SyncRun.id, SyncRun.project_id)).all()
+    return [(run_id, run_project) for run_id, run_project in rows]
+
+
+def project_summaries(
+    session: Session, project_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, tuple[SyncRun | None, int]]:
+    """Each project's latest run and number of comments posted. The caller owns the projects."""
+    if not project_ids:
+        return {}
+    latest = session.scalars(
+        select(SyncRun)
+        .where(SyncRun.project_id.in_(project_ids))
+        .order_by(SyncRun.project_id, SyncRun.created_at.desc())
+        .distinct(SyncRun.project_id)
+    ).all()
+    counts = session.execute(
+        select(PostedComment.project_id, func.count())
+        .where(
+            PostedComment.project_id.in_(project_ids),
+            PostedComment.status == CommentStatus.POSTED,
+        )
+        .group_by(PostedComment.project_id)
+    ).all()
+    posted = {project_id: count for project_id, count in counts}
+    last = {run.project_id: run for run in latest}
+    return {pid: (last.get(pid), posted.get(pid, 0)) for pid in project_ids}
 
 
 def other_run_active(session: Session, project_id: uuid.UUID, run_id: uuid.UUID) -> bool:

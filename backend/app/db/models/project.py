@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import ForeignKey, String, Text, UniqueConstraint, false, text
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -31,4 +32,7 @@ class Project(OwnedModel):
     include_merge_commits: Mapped[bool] = mapped_column(default=False, server_default=false())
     schedule_cron: Mapped[str | None] = mapped_column(String(100))
     schedule_enabled: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # The latest schedule slot a run was started for, so each slot fires once,
+    # even with several schedulers. Reset to "now" whenever the schedule changes.
+    schedule_last_fired_at: Mapped[datetime | None]
     dry_run_default: Mapped[bool] = mapped_column(default=False, server_default=false())

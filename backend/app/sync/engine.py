@@ -26,6 +26,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -65,6 +66,7 @@ from app.integrations.trackers.base import (
     TrackerNotFoundError,
     TrackerTransientError,
 )
+from app.sync.lock import NoLock, ProjectLock
 from app.sync.parser import (
     InvalidPatternError,
     PatternTimeoutError,
@@ -90,6 +92,10 @@ class RunFailedError(Exception):
     """Stops the run; the message is shown to the user."""
 
 
+class _RunCancelledError(Exception):
+    """The user cancelled the run; it stopped between commits."""
+
+
 @dataclass(frozen=True)
 class _Pair:
     commit: Commit
@@ -105,6 +111,7 @@ class _Run:
     run: SyncRun
     project: Project
     context: WorkerContext
+    lock: ProjectLock = field(default_factory=NoLock)
     warnings: list[str] = field(default_factory=list)
     # Commits with an error that may go away: cursors must not move past them.
     blocked: set[str] = field(default_factory=set)
@@ -140,11 +147,21 @@ class _Run:
             self.run.errors += 1
 
     def heartbeat(self, *, force: bool = False) -> None:
-        """Commit progress and show the run is alive, at most every few seconds."""
+        """Commit progress and show the run is alive, at most every few seconds.
+
+        Also keeps the project lock from expiring during a long run.
+        """
         if force or time.monotonic() - self._last_beat >= HEARTBEAT_SECONDS:
             self.run.updated_at = datetime.now(UTC)
             self.db.commit()
+            self.lock.refresh(self.project.id, self.run.id)
             self._last_beat = time.monotonic()
+
+    def cancel_requested(self) -> bool:
+        """Read fresh from the database: the API sets it while the run is going."""
+        return bool(
+            self.db.scalar(select(SyncRun.cancel_requested).where(SyncRun.id == self.run.id))
+        )
 
 
 # --- Git -----------------------------------------------------------------------------------
@@ -397,8 +414,12 @@ def _post(state: _Run, tracker: AzureBoardsClient, pair: _Pair, git: GitConnecti
 
 def _process(
     state: _Run, entries: list[_Entry], azure: AzureConnection, git: GitConnection
-) -> None:
-    """Steps 5-7, recording one item per commit or pair, oldest commit first."""
+) -> bool:
+    """Steps 5-7, recording one item per commit or pair, oldest commit first.
+
+    Returns True if the run was cancelled; the commits not reached are blocked,
+    so cursors stop before them.
+    """
     pairs = [_Pair(e.commit, e.branch, work_item_id) for e in entries for work_item_id in e.ids]
     with ExitStack() as stack:
         tracker = stack.enter_context(_tracker(state, azure)) if pairs else None
@@ -415,7 +436,10 @@ def _process(
                 p.work_item_id for p in pairs if (p.commit.sha, p.work_item_id) not in posted
             )
 
-        for entry in entries:
+        for index, entry in enumerate(entries):
+            if state.cancel_requested():  # checked between commits (spec section 8)
+                state.blocked.update(e.commit.sha for e in entries[index:])
+                return True
             commit, branch = entry.commit, entry.branch
             if entry.error is not None:
                 state.item(commit, branch, ItemAction.ERROR, detail=entry.error)
@@ -443,6 +467,7 @@ def _process(
                 elif tracker is not None:
                     _post(state, tracker, _Pair(commit, branch, work_item_id), git)
             state.heartbeat()
+    return False
 
 
 def _move_cursors(state: _Run, scan: _Scan) -> None:
@@ -475,7 +500,7 @@ def _execute(state: _Run) -> None:
     state.heartbeat(force=True)
     entries = _extract(scan, pattern)
     try:
-        _process(state, entries, azure, git)
+        cancelled = _process(state, entries, azure, git)
     except TrackerAuthError as exc:
         azure.last_test_ok = False  # show the connection as failing in Settings
         azure.last_test_at = datetime.now(UTC)
@@ -484,6 +509,12 @@ def _execute(state: _Run) -> None:
         raise RunFailedError(f"Azure DevOps: {exc}") from exc
     if not state.run.dry_run:  # dry runs never move cursors
         _move_cursors(state, scan)
+    if cancelled:
+        done = len(entries) - len({e.commit.sha for e in entries} & state.blocked)
+        raise _RunCancelledError(
+            f"Cancelled by the user after {done} of {len(entries)} commits. "
+            "The next run continues from there."
+        )
 
 
 def _git_failure(exc: GitError) -> str:
@@ -500,8 +531,27 @@ class _Outcome:
     message: str | None
 
 
+SKIPPED_MESSAGE = "Another run of this project was in progress, so this one was skipped."
+
+
+def _leave_queued(db: Session, run: SyncRun, **values: object) -> bool:
+    """Move a run out of `queued` only if it is still queued. Returns whether it was."""
+    if values.get("status") != RunStatus.RUNNING:
+        values["finished_at"] = func.now()
+    moved = db.execute(
+        update(SyncRun)
+        .where(SyncRun.id == run.id, SyncRun.status == RunStatus.QUEUED)
+        .values(**values)
+        .returning(SyncRun.id)
+    ).first()
+    db.commit()
+    db.refresh(run)
+    return moved is not None
+
+
 def run_sync(context: WorkerContext, run_id: uuid.UUID) -> None:
     """Execute a queued run. Never raises: the outcome is stored on the run."""
+    lock = context.project_lock()
     with context.session_factory() as db:
         run = db.get(SyncRun, run_id)
         if run is None or run.status != RunStatus.QUEUED:
@@ -510,22 +560,42 @@ def run_sync(context: WorkerContext, run_id: uuid.UUID) -> None:
         project = db.get(Project, run.project_id)
         if project is None:
             return
-        close_stale_runs(db, older_than=stale_after(context), project_id=project.id, exclude=run.id)
-        run.status = RunStatus.RUNNING
-        run.started_at = datetime.now(UTC)
+        # A run that stopped without finishing can't keep blocking the project.
+        for stale_run, stale_project in close_stale_runs(
+            db, older_than=stale_after(context), project_id=project.id, exclude=run.id
+        ):
+            lock.release(stale_project, stale_run)
         db.commit()
 
-        state = _Run(db=db, run=run, project=project, context=context)
-        outcome = _run_safely(state)
-        run.status = outcome.status
-        run.error_message = outcome.message
-        run.finished_at = datetime.now(UTC)
-        db.commit()
+        # Step 1: one run per project at a time.
+        if not lock.acquire(project.id, run.id):
+            _leave_queued(
+                db,
+                run,
+                status=RunStatus.SKIPPED,
+                started_at=func.now(),
+                error_message=SKIPPED_MESSAGE,
+            )
+            return
+        try:
+            # Conditional: the user may have cancelled it while it was queued.
+            if not _leave_queued(db, run, status=RunStatus.RUNNING, started_at=func.now()):
+                return
+            state = _Run(db=db, run=run, project=project, context=context, lock=lock)
+            outcome = _run_safely(state)
+            run.status = outcome.status
+            run.error_message = outcome.message
+            run.finished_at = datetime.now(UTC)
+            db.commit()
+        finally:
+            lock.release(project.id, run.id)
 
 
 def _run_safely(state: _Run) -> _Outcome:
     try:
         _execute(state)
+    except _RunCancelledError as exc:
+        return _Outcome(RunStatus.CANCELLED, "\n".join([str(exc), *state.warnings]))
     except RunFailedError as exc:
         return _failed(state, str(exc))
     except GitError as exc:

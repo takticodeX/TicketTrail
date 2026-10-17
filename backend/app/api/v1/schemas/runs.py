@@ -36,6 +36,7 @@ class RunResponse(BaseModel):
     skipped: int
     errors: int
     error_message: str | None
+    cancel_requested: bool
 
 
 class RunDetailResponse(RunResponse):

@@ -20,6 +20,10 @@ class RunStatus(StrEnum):
     PARTIAL = "partial"
     FAILED = "failed"
     SKIPPED = "skipped"
+    CANCELLED = "cancelled"  # not in the spec's list; agreed for Milestone 6
+
+
+ACTIVE_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING)
 
 
 class ItemAction(StrEnum):
@@ -57,6 +61,8 @@ class SyncRun(TimestampedModel):
     errors: Mapped[int] = mapped_column(default=0, server_default="0")
     # Why a run failed, or warnings for a partial run (missing branch, rewritten history).
     error_message: Mapped[str | None] = mapped_column(Text)
+    # Set by POST /runs/{id}/cancel; the worker checks it between commits.
+    cancel_requested: Mapped[bool] = mapped_column(default=False, server_default=false())
 
 
 class SyncRunItem(TimestampedModel):
