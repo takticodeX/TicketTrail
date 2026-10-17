@@ -24,7 +24,7 @@ WORKDIR /app
 COPY requirements.lock ./
 RUN pip install --require-hashes -r requirements.lock
 
-COPY alembic.ini ./
+COPY alembic.ini manage.py ./
 COPY alembic ./alembic
 COPY app ./app
 
