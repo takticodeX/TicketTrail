@@ -3,8 +3,12 @@
 TicketTrail reads commits from a Git repository and posts each commit message as a comment
 on the Azure DevOps work item it references. See [SPEC.md](SPEC.md) for the full design.
 
-> Status: Milestone 2. Accounts, login and the app shell work. Connections, projects and
-> syncing arrive in Milestones 3–6. A full setup and operations guide is part of Milestone 7.
+> Status: Milestone 3. Accounts, Git and Azure DevOps connections (with connection tests)
+> and projects can be set up under **Settings**. Syncing arrives in Milestones 4–6. A full
+> setup and operations guide is part of Milestone 7.
+
+Connection tests run on the worker and refuse hosts on private networks. To use a Git
+server on your LAN, set `TT_ALLOW_PRIVATE_HOSTS=true` in `.env`.
 
 ## Run it
 
