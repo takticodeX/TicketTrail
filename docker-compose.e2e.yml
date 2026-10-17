@@ -1,0 +1,48 @@
+# End-to-end test stack: the normal stack plus an offline Git server and fake Azure
+# DevOps ("fixtures", HTTPS with its own CA). Use a separate project name so your
+# real data is never touched:
+#   docker compose -p tickettrail-e2e -f docker-compose.yml -f docker-compose.e2e.yml up -d --build
+# then run the Playwright test (see README.md, "End-to-end test").
+
+services:
+  fixtures:
+    image: localhost/tickettrail-backend:latest
+    command: python /e2e/server.py
+    user: "0"  # writes the CA into the shared certs volume
+    volumes:
+      - ./e2e/fixtures:/e2e:ro
+      - e2e_certs:/certs
+    environment:
+      FAKE_AZURE_PAT: e2e-azure-pat-canary
+    ports:
+      - "127.0.0.1:8443:8443"  # the test reads /__fake__/comments
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import ssl, urllib.request; urllib.request.urlopen('https://127.0.0.1:8443/__fake__/health', context=ssl._create_unverified_context(), timeout=3)"
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    # Trust the fixtures CA for git (GIT_SSL_CAINFO) and for httpx (SSL_CERT_FILE),
+    # and allow its private address.
+    environment:
+      GIT_SSL_CAINFO: /certs/ca.pem
+      SSL_CERT_FILE: /certs/ca.pem
+      TT_ALLOW_PRIVATE_HOSTS: "true"
+    volumes:
+      - repos_data:/data/repos
+      - e2e_certs:/certs:ro
+    depends_on:
+      fixtures:
+        condition: service_healthy
+
+  api:
+    environment:
+      TT_ALLOW_PRIVATE_HOSTS: "true"
+
+volumes:
+  e2e_certs:
