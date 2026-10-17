@@ -1,0 +1,4 @@
+# Files run inside Linux containers must keep LF line endings.
+* text=auto eol=lf
+*.png binary
+*.ico binary
