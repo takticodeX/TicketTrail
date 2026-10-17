@@ -1,8 +1,18 @@
 # TicketTrail production-like stack. Start with: docker compose up -d
-# (Podman: podman compose up -d). Copy .env.example to .env first.
+# (Podman: podman compose up -d). Copy .env.example to .env first; see README.md.
 name: tickettrail
 
+# The app containers run as non-root users with a read-only filesystem: only the
+# repos_data volume (/data/repos) and an in-memory /tmp are writable (spec section 10).
+x-hardened: &hardened
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+
 x-backend: &backend
+  <<: *hardened
   build: ./backend
   image: localhost/tickettrail-backend:latest
   env_file: .env
@@ -15,6 +25,7 @@ x-backend: &backend
 
 services:
   frontend:
+    <<: *hardened
     build: ./frontend
     image: localhost/tickettrail-frontend:latest
     restart: unless-stopped
@@ -23,6 +34,11 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   api:
     <<: *backend
@@ -60,11 +76,19 @@ services:
 
   scheduler:
     <<: *backend
-    # Stub until Milestone 6 adds the database-backed schedule.
-    command: celery -A app.worker.celery_app beat --loglevel=INFO --schedule /tmp/celerybeat-schedule
+    # Celery Beat only ticks the dispatcher each minute; schedules live in the database.
+    command: >-
+      celery -A app.worker.celery_app beat --loglevel=INFO
+      --schedule /tmp/celerybeat-schedule --pidfile /tmp/celerybeat.pid
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 $$(cat /tmp/celerybeat.pid)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   db:
     image: docker.io/library/postgres:16-alpine
