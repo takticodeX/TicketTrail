@@ -134,6 +134,47 @@ export interface PatternTestResponse {
   results: { ids: number[]; error: string | null }[];
 }
 
+export type RunStatus = 'queued' | 'running' | 'success' | 'partial' | 'failed' | 'skipped';
+export type RunTrigger = 'manual' | 'scheduled';
+export type ItemAction =
+  | 'posted'
+  | 'would_post'
+  | 'skipped_duplicate'
+  | 'skipped_not_found'
+  | 'no_reference'
+  | 'error';
+
+export interface SyncRun {
+  id: string;
+  project_id: string;
+  trigger: RunTrigger;
+  dry_run: boolean;
+  status: RunStatus;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  commits_scanned: number;
+  comments_posted: number;
+  skipped: number;
+  errors: number;
+  /** Why the run failed, or warnings for a partial run. */
+  error_message: string | null;
+}
+
+export interface SyncRunDetail extends SyncRun {
+  counts_by_action: Partial<Record<ItemAction, number>>;
+}
+
+export interface SyncRunItem {
+  id: string;
+  commit_sha: string;
+  commit_subject: string;
+  branch: string;
+  work_item_id: number | null;
+  action: ItemAction;
+  detail: string | null;
+}
+
 export interface ErrorBody {
   error: {
     code: string;

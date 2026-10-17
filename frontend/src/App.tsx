@@ -5,7 +5,9 @@ import { RedirectIfAuthenticated, RequireAuth } from './components/RequireAuth';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { RunDetailPage } from './pages/RunDetailPage';
 import { AzureConnectionsPage } from './pages/settings/AzureConnectionsPage';
 import { GitConnectionsPage } from './pages/settings/GitConnectionsPage';
 import { ProfilePage } from './pages/settings/ProfilePage';
@@ -43,6 +45,8 @@ export function AppRoutes() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="dashboard" element={<Navigate to="/" replace />} />
+        <Route path="projects/:projectId" element={<ProjectDetailPage />} />
+        <Route path="projects/:projectId/runs/:runId" element={<RunDetailPage />} />
         <Route path="settings">
           <Route index element={<Navigate to="/settings/projects" replace />} />
           <Route path="projects" element={<ProjectsPage />} />

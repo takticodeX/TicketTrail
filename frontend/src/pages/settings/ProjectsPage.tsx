@@ -85,6 +85,9 @@ export function ProjectsPage() {
           </Table.Td>
           <Table.Td>
             <Group gap="xs" justify="flex-end" wrap="nowrap">
+              <Button size="xs" variant="light" component={Link} to={`/projects/${project.id}`}>
+                Open
+              </Button>
               <Button size="xs" variant="default" component={Link} to={`/settings/projects/${project.id}`}>
                 Edit
               </Button>
