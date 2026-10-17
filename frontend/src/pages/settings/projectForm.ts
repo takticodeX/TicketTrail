@@ -66,7 +66,7 @@ export function sampleCommit(
     body: rest.join('\n').trim(),
     author_name: 'Ada Lovelace',
     author_email: 'ada@example.com',
-    author_date: '2026-10-17 14:32',
+    author_date: '2026-10-17 14:32 UTC',
     branch,
     repo_name: repoName,
     commit_url: connection?.commit_url_pattern.replaceAll('{sha}', SAMPLE_SHA) ?? '',

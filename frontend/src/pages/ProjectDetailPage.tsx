@@ -19,6 +19,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { errorMessage } from '../api/errors';
 import { RunStatusBadge } from '../components/RunStatusBadge';
+import { SyncNowButton } from '../components/SyncNowButton';
 import { useRuns, useStartSync } from '../hooks/useRuns';
 import { useAzureConnections, useGitConnections, useProject } from '../hooks/useSettings';
 import { formatDateTime, runDuration } from '../lib/runs';
@@ -78,13 +79,15 @@ export function ProjectDetailPage() {
           <Button variant="default" component={Link} to={`/settings/projects/${projectId}`}>
             Settings
           </Button>
-          <Button onClick={onDryRun} loading={startSync.isPending}>
+          <Button variant="default" onClick={onDryRun} loading={startSync.isPending}>
             Dry run
           </Button>
+          <SyncNowButton project={project.data} runs={runs.data?.items} onDryRun={onDryRun} />
         </Group>
       </Group>
       <Text size="sm" c="dimmed">
         A dry run lists which comments would be posted, without changing anything in Azure DevOps.
+        Sync now posts them.
       </Text>
 
       <Group justify="space-between">

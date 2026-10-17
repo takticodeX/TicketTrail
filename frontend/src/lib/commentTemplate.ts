@@ -23,6 +23,7 @@ export const TEMPLATE_VARIABLES = [
 ] as const;
 
 export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number];
+/** Raw commit values; renderTemplate escapes them exactly as the sync will. */
 export type TemplateValues = Record<TemplateVariable, string>;
 
 export const MAX_TEMPLATE_LENGTH = 10_000;
@@ -93,11 +94,64 @@ export function commentTemplateError(template: string): string | null {
   return null;
 }
 
+// --- Rendering: the same as render_comment in backend/app/sync/template.py ---------------
+
+export const MAX_MESSAGE_LENGTH = 10_000;
+
+const INLINE = /([\\`*_{}[\]()<>|~!&])/g;
+const LINE_START = /^(\s*)([#+\-=>]|\d+[.)])/;
+
+/** Show text as written: Markdown neutralised, line breaks and paragraphs kept. */
+export function escapeMarkdown(text: string): string {
+  const line = (raw: string) =>
+    raw
+      .trim()
+      .replace(INLINE, '\\$1')
+      .replace(LINE_START, (_match, space: string, marker: string) =>
+        // "1." becomes "1\." (escape the punctuation); "#" or "-" becomes "\#" or "\-".
+        space + (/^\d/.test(marker) ? `${marker.slice(0, -1)}\\${marker.slice(-1)}` : `\\${marker}`),
+      );
+  return text
+    .replace(/\r\n/g, '\n')
+    .trim()
+    .split(/\n[ \t]*\n+/)
+    .filter((paragraph) => paragraph.trim())
+    .map((paragraph) =>
+      paragraph
+        .split('\n')
+        .filter((raw) => raw.trim())
+        .map(line)
+        .join('  \n'),
+    )
+    .join('\n\n');
+}
+
+export function truncate(text: string, limit = MAX_MESSAGE_LENGTH): string {
+  return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
+}
+
+function linkTarget(url: string): string {
+  return url ? encodeURI(url).replace(/\(/g, '%28').replace(/\)/g, '%29') : '';
+}
+
 /**
- * Fill in a valid template for the preview. TicketTrail always adds the
- * tt:{sha} marker when the template drops it, because crash recovery needs it.
+ * Fill in a valid template for the preview, exactly as the sync will post it.
+ * TicketTrail always adds the tt:{sha} marker when the template drops it,
+ * because crash recovery needs it.
  */
-export function renderTemplate(template: string, values: TemplateValues): string {
+export function renderTemplate(template: string, raw: TemplateValues): string {
+  const values: TemplateValues = {
+    ...raw,
+    short_sha: raw.sha.slice(0, 7),
+    message: escapeMarkdown(truncate(raw.message)),
+    subject: escapeMarkdown(raw.subject),
+    body: escapeMarkdown(truncate(raw.body)),
+    author_name: escapeMarkdown(raw.author_name),
+    author_email: escapeMarkdown(raw.author_email),
+    branch: raw.branch.replace(/`/g, "'").replace(/\n/g, ' '),
+    repo_name: escapeMarkdown(raw.repo_name),
+    commit_url: linkTarget(raw.commit_url),
+  };
   const withMarker = template.includes(MARKER) ? template : `${template}\n\n<sub>${MARKER}</sub>`;
   return parse(withMarker)
     .map((part) => (typeof part === 'string' ? part : values[part.name as TemplateVariable]))

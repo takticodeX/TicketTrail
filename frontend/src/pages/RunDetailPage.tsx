@@ -60,7 +60,7 @@ function RunSummary({ run }: { run: SyncRunDetail }) {
         label={run.dry_run ? 'Would post' : 'Comments posted'}
         value={run.dry_run ? (counts.would_post ?? 0) : run.comments_posted}
       />
-      <Stat label="No reference" value={counts.no_reference ?? 0} />
+      <Stat label="Skipped" value={run.skipped} />
       <Stat label="Errors" value={run.errors} />
     </SimpleGrid>
   );
