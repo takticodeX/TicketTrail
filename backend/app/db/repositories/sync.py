@@ -1,13 +1,23 @@
 """Sync runs and their items. Runs are owned through their project's owner_id."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.db.models import Project, ProjectCursor, SyncRun, SyncRunItem
+from app.db.models import (
+    CommentStatus,
+    PostedComment,
+    Project,
+    ProjectCursor,
+    RunStatus,
+    SyncRun,
+    SyncRunItem,
+)
 
 
 class SyncRunRepository:
@@ -72,3 +82,87 @@ class CursorRepository:
             )
         ).all()
         return {branch: sha for branch, sha in rows}
+
+    def move(self, project_id: uuid.UUID, branch: str, sha: str) -> None:
+        statement = insert(ProjectCursor).values(
+            id=uuid.uuid4(), project_id=project_id, branch=branch, last_sha=sha
+        )
+        self.session.execute(
+            statement.on_conflict_do_update(
+                constraint="uq_project_cursors_project_branch",
+                set_={"last_sha": sha, "updated_at": func.now()},
+            )
+        )
+
+
+class PostedCommentRepository:
+    """Internal to the worker: the caller has already resolved the project."""
+
+    def __init__(self, session: Session, project_id: uuid.UUID) -> None:
+        self.session = session
+        self.project_id = project_id
+
+    def for_commits(self, shas: Iterable[str]) -> dict[tuple[str, int], PostedComment]:
+        rows = self.session.scalars(
+            select(PostedComment).where(
+                PostedComment.project_id == self.project_id,
+                PostedComment.commit_sha.in_(list(set(shas))),
+            )
+        ).all()
+        return {(row.commit_sha, row.work_item_id): row for row in rows}
+
+    def pending(self) -> Sequence[PostedComment]:
+        return self.session.scalars(
+            select(PostedComment).where(
+                PostedComment.project_id == self.project_id,
+                PostedComment.status == CommentStatus.PENDING,
+            )
+        ).all()
+
+
+STALE_RUN_MESSAGE = (
+    "The run stopped making progress (the worker was probably restarted). "
+    "Start it again: nothing will be posted twice."
+)
+
+
+def close_stale_runs(
+    session: Session,
+    *,
+    older_than: timedelta,
+    project_id: uuid.UUID | None = None,
+    exclude: uuid.UUID | None = None,
+) -> int:
+    """Fail queued or running runs whose heartbeat stopped. Returns how many."""
+    statement = (
+        update(SyncRun)
+        .where(
+            SyncRun.status.in_([RunStatus.QUEUED, RunStatus.RUNNING]),
+            SyncRun.updated_at < datetime.now(UTC) - older_than,
+        )
+        .values(
+            status=RunStatus.FAILED,
+            finished_at=func.now(),
+            error_message=STALE_RUN_MESSAGE,
+        )
+    )
+    if project_id is not None:
+        statement = statement.where(SyncRun.project_id == project_id)
+    if exclude is not None:
+        statement = statement.where(SyncRun.id != exclude)
+    result = session.execute(statement)
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
+def other_run_active(session: Session, project_id: uuid.UUID, run_id: uuid.UUID) -> bool:
+    return bool(
+        session.scalar(
+            select(func.count())
+            .select_from(SyncRun)
+            .where(
+                SyncRun.project_id == project_id,
+                SyncRun.id != run_id,
+                SyncRun.status == RunStatus.RUNNING,
+            )
+        )
+    )

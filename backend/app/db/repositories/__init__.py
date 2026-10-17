@@ -7,7 +7,13 @@ from app.db.repositories.owned import (
     ProjectRepository,
 )
 from app.db.repositories.refresh_tokens import RefreshTokenRepository
-from app.db.repositories.sync import CursorRepository, SyncRunRepository
+from app.db.repositories.sync import (
+    CursorRepository,
+    PostedCommentRepository,
+    SyncRunRepository,
+    close_stale_runs,
+    other_run_active,
+)
 from app.db.repositories.users import UserRepository
 
 __all__ = [
@@ -15,8 +21,11 @@ __all__ = [
     "CursorRepository",
     "GitConnectionRepository",
     "OwnedRepository",
+    "PostedCommentRepository",
     "ProjectRepository",
     "RefreshTokenRepository",
     "SyncRunRepository",
     "UserRepository",
+    "close_stale_runs",
+    "other_run_active",
 ]

@@ -82,6 +82,36 @@ class SyncRunItem(TimestampedModel):
     branch: Mapped[str] = mapped_column(String(255), default="", server_default="")
 
 
+class CommentStatus(StrEnum):
+    PENDING = "pending"
+    POSTED = "posted"
+
+
+class PostedComment(TimestampedModel):
+    """The source of truth for de-duplication: one row per commit / work item pair.
+
+    The unique constraint is what guarantees a commit is never posted twice to the
+    same work item. A row is inserted as `pending` (and committed) before the
+    comment is sent, then marked `posted`; a `pending` row left by a crash is
+    resolved by looking for the tt:{sha} marker in the work item's comments.
+    """
+
+    __tablename__ = "posted_comments"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "commit_sha", "work_item_id", name="uq_posted_comments_pair"
+        ),
+        CheckConstraint(_in("status", CommentStatus), name="status_valid"),
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    commit_sha: Mapped[str] = mapped_column(String(40))
+    work_item_id: Mapped[int]
+    azure_comment_id: Mapped[int | None]
+    status: Mapped[str] = mapped_column(String(16), default=CommentStatus.PENDING)
+    posted_at: Mapped[datetime | None]
+
+
 class ProjectCursor(TimestampedModel):
     """Where the last successful (non-dry) sync stopped on a branch. Only an optimisation."""
 

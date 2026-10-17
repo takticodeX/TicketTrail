@@ -8,10 +8,17 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
+from tests.fixtures.azure import FakeAzure
 from tests.fixtures.repos import FixtureRepo
 from tests.integration.helpers import create_project, signed_in
 
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("no_dns")]
+
+
+@pytest.fixture(autouse=True)
+def board(azure: FakeAzure) -> FakeAzure:
+    azure.work_items.update(range(1, 10))
+    return azure
 
 
 @pytest.fixture
@@ -66,25 +73,17 @@ def test_run_starts_queued(
     assert args == [project["id"], "manual", True, run_id]
 
 
-def test_real_sync_is_refused_for_now(
-    client: TestClient, headers: dict[str, str], project: dict[str, Any], db_engine: Engine
-) -> None:
-    response = start(client, headers, project, dry_run=False)
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "sync_not_available"
-    # dry_run omitted uses the project's default, which is off
-    assert start(client, headers, project).status_code == 400
-    with db_engine.connect() as conn:
-        assert conn.execute(text("SELECT count(*) FROM sync_runs")).scalar_one() == 0
-
-
 def test_dry_run_default_applies_when_omitted(
-    client: TestClient, headers: dict[str, str], project: dict[str, Any]
+    app: FastAPI, client: TestClient, headers: dict[str, str], project: dict[str, Any]
 ) -> None:
+    app.state.task_runner.run_queued_tasks = False
+    real = start(client, headers, project).json()["run_id"]  # the default is off
     client.patch(
         f"/api/v1/projects/{project['id']}", headers=headers, json={"dry_run_default": True}
     )
-    assert start(client, headers, project).status_code == 202
+    dry = start(client, headers, project).json()["run_id"]
+    assert client.get(f"/api/v1/runs/{real}", headers=headers).json()["dry_run"] is False
+    assert client.get(f"/api/v1/runs/{dry}", headers=headers).json()["dry_run"] is True
 
 
 def test_queue_down_marks_the_run_failed(

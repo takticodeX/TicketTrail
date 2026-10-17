@@ -1,19 +1,25 @@
-"""The dry-run engine against fixture repositories and a real Postgres."""
+"""The engine's Git side, through dry runs, against fixture repositories and a real Postgres."""
 
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
-import respx
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
+from tests.fixtures.azure import FakeAzure
 from tests.fixtures.repos import FixtureRepo
 from tests.integration.helpers import create_project, signed_in
 
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("no_dns")]
+
+
+@pytest.fixture(autouse=True)
+def board(azure: FakeAzure) -> FakeAzure:
+    """Every work item these tests mention exists."""
+    azure.work_items.update(range(1, 100))
+    return azure
 
 
 @pytest.fixture
@@ -102,15 +108,19 @@ def test_dry_run_lists_each_commit_with_its_ids(
     assert len(first["commit_sha"]) == 40
 
 
-def test_nothing_is_sent_to_azure(
-    client: TestClient, headers: dict[str, str], origin: FixtureRepo, project_for: ProjectFactory
+def test_dry_runs_post_nothing(
+    client: TestClient,
+    headers: dict[str, str],
+    origin: FixtureRepo,
+    project_for: ProjectFactory,
+    board: FakeAzure,
+    db_engine: Engine,
 ) -> None:
     origin.commit("Fix AB#1")
-    project = project_for(origin)
-    with respx.mock(assert_all_called=False) as azure:
-        route = azure.route(host="dev.azure.com").mock(return_value=httpx.Response(500))
-        assert dry_run(client, headers, project)["status"] == "success"
-    assert not route.called
+    assert dry_run(client, headers, project_for(origin))["status"] == "success"
+    assert board.posts == 0
+    with db_engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM posted_comments")).scalar_one() == 0
 
 
 def test_merge_commits_are_skipped_by_default(

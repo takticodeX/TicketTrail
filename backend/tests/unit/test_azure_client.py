@@ -10,7 +10,7 @@ PROJECT_URL = f"{ORG}/_apis/projects/My%20Project"
 
 
 def client() -> AzureBoardsClient:
-    return AzureBoardsClient(ORG, "My Project", "the-pat", timeout=5)
+    return AzureBoardsClient(ORG, "My Project", "the-pat", timeout=5, sleep=lambda _: None)
 
 
 @respx.mock

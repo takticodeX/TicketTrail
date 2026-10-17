@@ -15,7 +15,7 @@ from app.api.v1.schemas import (
     SyncRequest,
     SyncStarted,
 )
-from app.core.errors import AppError, not_found
+from app.core.errors import not_found
 from app.db.models import ItemAction, RunStatus, RunTrigger, SyncRun
 from app.db.repositories import ProjectRepository, SyncRunRepository
 from app.worker import task_names
@@ -24,11 +24,7 @@ from app.worker.runner import WorkerUnavailableError
 router = APIRouter(tags=["runs"])
 
 
-@router.post(
-    "/projects/{project_id}/sync",
-    status_code=status.HTTP_202_ACCEPTED,
-    responses={400: {"description": "Real syncs are not available yet"}},
-)
+@router.post("/projects/{project_id}/sync", status_code=status.HTTP_202_ACCEPTED)
 def start_sync(
     project_id: uuid.UUID,
     body: SyncRequest,
@@ -41,13 +37,6 @@ def start_sync(
     if project is None:
         raise not_found("Project")
     dry_run = project.dry_run_default if body.dry_run is None else body.dry_run
-    if not dry_run:
-        raise AppError(
-            400,
-            "sync_not_available",
-            "Only dry runs are available in this version; posting to Azure DevOps comes next.",
-        )
-
     run = SyncRun(project_id=project.id, trigger=RunTrigger.MANUAL, dry_run=dry_run)
     db.add(run)
     db.commit()

@@ -4,7 +4,9 @@ from app.db.models.connections import AzureConnection, GitAuthType, GitConnectio
 from app.db.models.project import Project
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.sync import (
+    CommentStatus,
     ItemAction,
+    PostedComment,
     ProjectCursor,
     RunStatus,
     RunTrigger,
@@ -15,9 +17,11 @@ from app.db.models.user import User, UserRole
 
 __all__ = [
     "AzureConnection",
+    "CommentStatus",
     "GitAuthType",
     "GitConnection",
     "ItemAction",
+    "PostedComment",
     "Project",
     "ProjectCursor",
     "RefreshToken",

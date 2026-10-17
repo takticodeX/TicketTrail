@@ -18,6 +18,7 @@ from sqlalchemy import Engine, create_engine, text
 from app.config import Settings
 from app.main import create_app
 from app.worker.context import WorkerContext
+from tests.fixtures.azure import FakeAzure, fake_azure
 from tests.integration.fakes import InProcessTaskRunner
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -66,7 +67,7 @@ def _clean_tables(request: pytest.FixtureRequest) -> Iterator[None]:
     if "db_engine" in request.fixturenames:
         engine: Engine = request.getfixturevalue("db_engine")
         with engine.begin() as conn:
-            conn.execute(text("TRUNCATE users, refresh_tokens CASCADE"))
+            conn.execute(text("TRUNCATE users, refresh_tokens, posted_comments CASCADE"))
 
 
 @pytest.fixture
@@ -80,6 +81,13 @@ def no_dns(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+def azure() -> Iterator[FakeAzure]:
+    """A fake Azure DevOps board at https://dev.azure.com/acme, project "proj"."""
+    with fake_azure() as board:
+        yield board
+
+
+@pytest.fixture
 def app_factory(
     migrated_database_url: str,
     make_settings: Callable[..., Settings],
@@ -90,6 +98,7 @@ def app_factory(
 
     def factory(**overrides: Any) -> FastAPI:
         app = create_app(make_settings(database_url=migrated_database_url, **overrides))
+        sleeps: list[float] = []
         # Run worker tasks in-process against the test database instead of via Redis,
         # syncing from file:// fixture repositories into a temp directory.
         app.state.task_runner = InProcessTaskRunner(
@@ -99,8 +108,10 @@ def app_factory(
                 secret_box=app.state.secret_box,
                 repos_dir=tmp_path / "repos",
                 git_protocols="file",
+                sleep=sleeps.append,  # retries wait instantly; tests can read the waits
             )
         )
+        app.state.sleeps = sleeps
         created.append(app)
         return app
 

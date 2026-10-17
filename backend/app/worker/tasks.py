@@ -1,11 +1,17 @@
+import logging
 import uuid
 from typing import Any
 
-from app.sync.engine import run_sync
+from celery.signals import worker_ready
+
+from app.db.repositories import close_stale_runs
+from app.sync.engine import run_sync, stale_after
 from app.worker import task_names
 from app.worker.celery_app import celery_app
 from app.worker.connection_checks import run_azure_connection_check, run_git_connection_check
 from app.worker.context import get_worker_context
+
+logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name=task_names.PING)
@@ -38,3 +44,14 @@ def check_azure_connection(connection_id: str, owner_id: str) -> dict[str, Any]:
     return run_azure_connection_check(
         get_worker_context(), uuid.UUID(connection_id), uuid.UUID(owner_id)
     )
+
+
+@worker_ready.connect
+def close_runs_left_by_a_crash(**_: Any) -> None:
+    """A run whose heartbeat stopped long ago belonged to a worker that died."""
+    context = get_worker_context()
+    with context.session_factory() as db:
+        closed = close_stale_runs(db, older_than=stale_after(context))
+        db.commit()
+    if closed:
+        logger.warning("Closed %d run(s) left behind by a stopped worker", closed)
