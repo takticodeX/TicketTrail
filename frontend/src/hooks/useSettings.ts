@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import * as api from '../api/settings';
 import type { AzureConnectionInput, GitConnectionInput, ProjectInput } from '../api/types';
+import { POLL_MS, isRunActive } from '../lib/runs';
 
 export const settingsKeys = {
   git: ['git-connections'] as const,
@@ -19,7 +20,13 @@ export function useAzureConnections() {
 }
 
 export function useProjects() {
-  return useQuery({ queryKey: settingsKeys.projects, queryFn: api.listProjects });
+  return useQuery({
+    queryKey: settingsKeys.projects,
+    queryFn: api.listProjects,
+    // The dashboard cards follow runs in progress.
+    refetchInterval: (query) =>
+      query.state.data?.items.some((p) => p.last_run && isRunActive(p.last_run)) ? POLL_MS : false,
+  });
 }
 
 export function useProject(id: string | undefined) {

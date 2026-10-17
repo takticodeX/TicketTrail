@@ -16,13 +16,15 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import { useState } from 'react';
+import { modals } from '@mantine/modals';
+import { notifications } from '@mantine/notifications';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { errorMessage } from '../api/errors';
 import type { ItemAction, SyncRunDetail } from '../api/types';
 import { RunStatusBadge } from '../components/RunStatusBadge';
-import { useRun, useRunItems } from '../hooks/useRuns';
+import { useCancelRun, useRun, useRunItems } from '../hooks/useRuns';
 import { useAzureConnections, useGitConnections, useProject } from '../hooks/useSettings';
 import {
   ACTION_COLORS,
@@ -74,7 +76,16 @@ export function RunDetailPage() {
   const azure = useAzureConnections();
   const [action, setAction] = useState<ItemAction | null>(null);
   const [page, setPage] = useState(1);
-  const items = useRunItems(runId, page, action);
+  const live = run.data ? isRunActive(run.data) : false;
+  const items = useRunItems(runId, page, action, live);
+  const cancel = useCancelRun(runId);
+
+  // Reload the items once more when the run finishes, so the last ones show up.
+  const status = run.data?.status;
+  const refetchItems = items.refetch;
+  useEffect(() => {
+    if (status && !live) void refetchItems();
+  }, [status, live, refetchItems]);
 
   if (run.isPending) {
     return (
@@ -95,11 +106,24 @@ export function RunDetailPage() {
   const azureConnection = azure.data?.items.find((c) => c.id === project.data?.azure_connection_id);
   const totalPages = items.data ? Math.max(1, Math.ceil(items.data.total / PAGE_SIZE)) : 1;
   const failed = run.data.status === 'failed';
+  const cancelled = run.data.status === 'cancelled';
 
-  const refresh = () => {
-    void run.refetch();
-    void items.refetch();
-  };
+  const onCancel = () =>
+    modals.openConfirmModal({
+      title: 'Cancel this run?',
+      children: (
+        <Text size="sm">
+          It stops after the commit it is working on. Comments already posted stay, and the next
+          run continues from there.
+        </Text>
+      ),
+      labels: { confirm: 'Cancel run', cancel: 'Keep running' },
+      confirmProps: { color: 'red' },
+      onConfirm: () =>
+        cancel.mutate(undefined, {
+          onError: (error) => notifications.show({ color: 'red', message: errorMessage(error) }),
+        }),
+    });
 
   const onFilter = (value: string) => {
     setAction(value === ALL ? null : (value as ItemAction));
@@ -122,21 +146,27 @@ export function RunDetailPage() {
         </Text>
       </div>
 
-      {isRunActive(run.data) && (
+      {live && (
         <Alert color="blue" variant="light" title="The run is in progress">
           <Group justify="space-between">
-            <Text size="sm">Refresh to see the latest results.</Text>
-            <Button size="xs" variant="light" onClick={refresh} loading={run.isFetching}>
-              Refresh
-            </Button>
+            <Text size="sm">
+              {run.data.cancel_requested
+                ? 'Cancelling: the run stops after the current commit.'
+                : 'This page updates by itself.'}
+            </Text>
+            {!run.data.cancel_requested && (
+              <Button size="xs" variant="light" color="red" onClick={onCancel} loading={cancel.isPending}>
+                Cancel
+              </Button>
+            )}
           </Group>
         </Alert>
       )}
       {run.data.error_message && (
         <Alert
-          color={failed ? 'red' : 'yellow'}
+          color={failed ? 'red' : cancelled ? 'gray' : 'yellow'}
           variant="light"
-          title={failed ? 'The run failed' : 'Warnings'}
+          title={failed ? 'The run failed' : cancelled ? 'Cancelled' : 'Warnings'}
           role={failed ? 'alert' : 'status'}
         >
           <Text size="sm" style={{ whiteSpace: 'pre-line' }}>

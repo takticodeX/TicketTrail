@@ -1,4 +1,5 @@
 import { MantineProvider } from '@mantine/core';
+import { ModalsProvider } from '@mantine/modals';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, type RenderResult } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
@@ -19,7 +20,7 @@ export function renderWithProviders(
     <MantineProvider theme={theme}>
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={[route]} future={ROUTER_FUTURE}>
-          {children}
+          <ModalsProvider>{children}</ModalsProvider>
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>

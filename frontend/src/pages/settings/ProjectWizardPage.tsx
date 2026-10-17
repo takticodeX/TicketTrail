@@ -366,7 +366,8 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
                     )}
                   />
                   <Text size="xs" c="dimmed">
-                    The schedule is saved now; scheduled runs start in a later release.
+                    Scheduled runs follow the Dry run by default setting. Changes apply within a
+                    minute.
                   </Text>
                 </Stack>
               </Stepper.Step>

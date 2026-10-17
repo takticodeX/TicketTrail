@@ -1,14 +1,87 @@
-import { Alert, Anchor, Button, Card, Center, Loader, SimpleGrid, Stack, Text, Title } from '@mantine/core';
+import {
+  Alert,
+  Anchor,
+  Button,
+  Card,
+  Center,
+  Group,
+  Loader,
+  SimpleGrid,
+  Stack,
+  Text,
+  Title,
+} from '@mantine/core';
 import { Link } from 'react-router-dom';
 
 import { errorMessage } from '../api/errors';
+import type { Project } from '../api/types';
+import { RunStatusBadge } from '../components/RunStatusBadge';
+import { SyncNowButton } from '../components/SyncNowButton';
 import { useAuth } from '../hooks/useAuth';
+import { useDryRun } from '../hooks/useDryRun';
 import { useProjects } from '../hooks/useSettings';
+import { formatDateTime } from '../lib/runs';
+import { formatRunTime } from '../lib/schedule';
 
-/** One card per project. Last run status and Sync now buttons arrive with Milestone 6. */
+function ProjectCard({ project, timeZone }: { project: Project; timeZone: string }) {
+  const dryRun = useDryRun(project.id);
+  const last = project.last_run;
+  const posted = project.comments_posted ?? 0;
+
+  return (
+    <Card withBorder radius="md" padding="lg" aria-label={project.name}>
+      <Stack gap="sm">
+        <Group justify="space-between" wrap="nowrap" align="flex-start">
+          <Anchor component={Link} to={`/projects/${project.id}`} fw={600} size="lg" lineClamp={1}>
+            {project.name}
+          </Anchor>
+          {last && <RunStatusBadge status={last.status} />}
+        </Group>
+        <Stack gap={2}>
+          <Text size="sm">
+            {last ? (
+              <>
+                Last run:{' '}
+                <Anchor component={Link} to={`/projects/${project.id}/runs/${last.id}`} size="sm">
+                  {formatDateTime(last.started_at ?? last.created_at)}
+                </Anchor>
+                {last.dry_run && ' (dry run)'}
+              </>
+            ) : (
+              <Text span c="dimmed" size="sm">
+                Never run
+              </Text>
+            )}
+          </Text>
+          <Text size="sm">
+            {project.next_run_at ? (
+              <>Next run: {formatRunTime(new Date(project.next_run_at), timeZone)}</>
+            ) : (
+              <Text span c="dimmed" size="sm">
+                No schedule: manual only
+              </Text>
+            )}
+          </Text>
+          <Text size="sm">
+            {posted} {posted === 1 ? 'comment' : 'comments'} posted
+          </Text>
+        </Stack>
+        <Group gap="xs" mt="xs">
+          <Button size="xs" variant="default" onClick={dryRun.start} loading={dryRun.pending}>
+            Dry run
+          </Button>
+          <SyncNowButton project={project} onDryRun={dryRun.start} size="xs" />
+        </Group>
+      </Stack>
+    </Card>
+  );
+}
+
+/** One card per project: last run, next scheduled run, comments posted, Sync now / Dry run. */
 export function DashboardPage() {
   const { user } = useAuth();
   const projects = useProjects();
+  const timeZone = user?.timezone ?? 'UTC';
 
   return (
     <Stack maw={1100}>
@@ -40,19 +113,7 @@ export function DashboardPage() {
       {projects.data && projects.data.items.length > 0 && (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
           {projects.data.items.map((project) => (
-            <Card key={project.id} withBorder radius="md" padding="lg">
-              <Stack gap="xs">
-                <Anchor component={Link} to={`/projects/${project.id}`} fw={600} size="lg">
-                  {project.name}
-                </Anchor>
-                <Text size="sm" c="dimmed">
-                  {project.branches.length > 0 ? project.branches.join(', ') : 'Default branch'}
-                </Text>
-                <Button component={Link} to={`/projects/${project.id}`} variant="light" mt="xs">
-                  Open
-                </Button>
-              </Stack>
-            </Card>
+            <ProjectCard key={project.id} project={project} timeZone={timeZone} />
           ))}
         </SimpleGrid>
       )}

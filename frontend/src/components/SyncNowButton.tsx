@@ -1,4 +1,4 @@
-import { Button, Group, Stack, Text } from '@mantine/core';
+import { Button, Group, Stack, Text, type ButtonProps } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { useQueryClient } from '@tanstack/react-query';
@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { errorMessage } from '../api/errors';
-import { getRun } from '../api/runs';
+import { getRun, listRuns } from '../api/runs';
 import type { Project, SyncRun, SyncRunDetail } from '../api/types';
 import { runKeys, useStartSync } from '../hooks/useRuns';
 import { formatDateTime } from '../lib/runs';
@@ -58,12 +58,12 @@ function Summary({ project, dryRun }: { project: Project; dryRun: SyncRunDetail 
 /** "Sync now" posts to Azure DevOps, so it asks first, with the last dry run's numbers. */
 export function SyncNowButton({
   project,
-  runs,
   onDryRun,
+  size,
 }: {
   project: Project;
-  runs: SyncRun[] | undefined;
   onDryRun: () => void;
+  size?: ButtonProps['size'];
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -77,20 +77,24 @@ export function SyncNowButton({
     });
 
   const onClick = async () => {
-    const latest = lastDryRun(runs);
     let detail: SyncRunDetail | null = null;
-    if (latest) {
-      setPreparing(true);
-      try {
+    setPreparing(true);
+    try {
+      const recent = await queryClient.fetchQuery({
+        queryKey: [...runKeys.list(project.id), 1],
+        queryFn: () => listRuns(project.id, 1),
+      });
+      const latest = lastDryRun(recent.items);
+      if (latest) {
         detail = await queryClient.fetchQuery({
           queryKey: runKeys.detail(latest.id),
           queryFn: () => getRun(latest.id),
         });
-      } catch {
-        detail = null;
-      } finally {
-        setPreparing(false);
       }
+    } catch {
+      detail = null; // the confirmation still works, just without numbers
+    } finally {
+      setPreparing(false);
     }
     const id = modals.open({
       title: 'Post comments to Azure DevOps?',
@@ -127,7 +131,7 @@ export function SyncNowButton({
   };
 
   return (
-    <Button onClick={() => void onClick()} loading={preparing || startSync.isPending}>
+    <Button size={size} onClick={() => void onClick()} loading={preparing || startSync.isPending}>
       Sync now
     </Button>
   );

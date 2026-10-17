@@ -7,6 +7,7 @@ export const STATUS_LABELS: Record<RunStatus, string> = {
   partial: 'Partial',
   failed: 'Failed',
   skipped: 'Skipped',
+  cancelled: 'Cancelled',
 };
 
 export const STATUS_COLORS: Record<RunStatus, string> = {
@@ -16,7 +17,11 @@ export const STATUS_COLORS: Record<RunStatus, string> = {
   partial: 'yellow',
   failed: 'red',
   skipped: 'gray',
+  cancelled: 'gray',
 };
+
+/** Pages refresh this often while a run is queued or running (spec section 9). */
+export const POLL_MS = 2000;
 
 export const ACTION_LABELS: Record<ItemAction, string> = {
   posted: 'Posted',

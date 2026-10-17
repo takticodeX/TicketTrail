@@ -13,28 +13,31 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 
 import { errorMessage } from '../api/errors';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { SyncNowButton } from '../components/SyncNowButton';
-import { useRuns, useStartSync } from '../hooks/useRuns';
+import { useAuth } from '../hooks/useAuth';
+import { useDryRun } from '../hooks/useDryRun';
+import { useRuns } from '../hooks/useRuns';
 import { useAzureConnections, useGitConnections, useProject } from '../hooks/useSettings';
 import { formatDateTime, runDuration } from '../lib/runs';
+import { formatRunTime } from '../lib/schedule';
 
 const PAGE_SIZE = 20;
 
 export function ProjectDetailPage() {
   const { projectId = '' } = useParams();
-  const navigate = useNavigate();
+  const { user } = useAuth();
+  const timeZone = user?.timezone ?? 'UTC';
   const project = useProject(projectId);
   const git = useGitConnections();
   const azure = useAzureConnections();
   const [page, setPage] = useState(1);
   const runs = useRuns(projectId, page);
-  const startSync = useStartSync(projectId);
+  const dryRun = useDryRun(projectId);
 
   if (project.isPending) {
     return (
@@ -53,12 +56,6 @@ export function ProjectDetailPage() {
 
   const gitConnection = git.data?.items.find((c) => c.id === project.data.git_connection_id);
   const azureConnection = azure.data?.items.find((c) => c.id === project.data.azure_connection_id);
-
-  const onDryRun = () =>
-    startSync.mutate(true, {
-      onSuccess: ({ run_id }) => navigate(`/projects/${projectId}/runs/${run_id}`),
-      onError: (error) => notifications.show({ color: 'red', message: errorMessage(error) }),
-    });
 
   const totalPages = runs.data ? Math.max(1, Math.ceil(runs.data.total / PAGE_SIZE)) : 1;
 
@@ -79,23 +76,20 @@ export function ProjectDetailPage() {
           <Button variant="default" component={Link} to={`/settings/projects/${projectId}`}>
             Settings
           </Button>
-          <Button variant="default" onClick={onDryRun} loading={startSync.isPending}>
+          <Button variant="default" onClick={dryRun.start} loading={dryRun.pending}>
             Dry run
           </Button>
-          <SyncNowButton project={project.data} runs={runs.data?.items} onDryRun={onDryRun} />
+          <SyncNowButton project={project.data} onDryRun={dryRun.start} />
         </Group>
       </Group>
       <Text size="sm" c="dimmed">
         A dry run lists which comments would be posted, without changing anything in Azure DevOps.
         Sync now posts them.
+        {project.data.next_run_at &&
+          ` Next scheduled run: ${formatRunTime(new Date(project.data.next_run_at), timeZone)}.`}
       </Text>
 
-      <Group justify="space-between">
-        <Title order={4}>Run history</Title>
-        <Button size="xs" variant="subtle" onClick={() => void runs.refetch()} loading={runs.isFetching}>
-          Refresh
-        </Button>
-      </Group>
+      <Title order={4}>Run history</Title>
       {runs.isError && (
         <Alert color="red" variant="light" role="alert">
           {errorMessage(runs.error)}

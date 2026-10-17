@@ -1,12 +1,16 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AzureConnection, GitConnection, Project, SyncRun, SyncRunDetail, SyncRunItem } from '../api/types';
-import { errorResponse, jsonResponse, mockFetch, renderWithProviders } from '../test/utils';
+import { useAuth } from '../hooks/useAuth';
+import { authValue, errorResponse, jsonResponse, mockFetch, renderWithProviders } from '../test/utils';
 import { ProjectDetailPage } from './ProjectDetailPage';
 import { RunDetailPage } from './RunDetailPage';
+
+vi.mock('../hooks/useAuth', () => ({ useAuth: vi.fn() }));
+beforeEach(() => vi.mocked(useAuth).mockReturnValue(authValue()));
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -43,6 +47,7 @@ const run: SyncRunDetail = {
   skipped: 0,
   errors: 0,
   error_message: null,
+  cancel_requested: false,
   counts_by_action: { would_post: 2, no_reference: 1 },
 };
 
@@ -156,14 +161,52 @@ describe('RunDetailPage', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
-  it('offers a refresh while the run is in progress', async () => {
+  it('updates by itself while the run is in progress', async () => {
+    const running = { ...run, status: 'running', finished_at: null };
+    const answers = [running, { ...run, status: 'success' }];
     baseRoutes({
-      'GET /api/v1/runs/r1': () => jsonResponse({ ...run, status: 'running', finished_at: null }),
-      'GET /api/v1/runs/r1/items?page=1&page_size=50': () => page([]),
+      'GET /api/v1/runs/r1': () => jsonResponse(answers.length > 1 ? answers.shift() : answers[0]),
+      'GET /api/v1/runs/r1/items?page=1&page_size=50': () => page([item({})]),
     });
     renderAt('/projects/p1/runs/r1');
     expect(await screen.findByText('The run is in progress')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+    expect(screen.getByText('This page updates by itself.')).toBeInTheDocument();
+    // The next poll (2 s later) sees the run finished.
+    expect(await screen.findByText('Success', {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.queryByText('The run is in progress')).not.toBeInTheDocument();
+  });
+
+  it('cancels a running run after confirming', async () => {
+    const running = { ...run, status: 'running', finished_at: null };
+    let cancelled = false;
+    const fetchMock = baseRoutes({
+      'GET /api/v1/runs/r1': () => jsonResponse({ ...running, cancel_requested: cancelled }),
+      'GET /api/v1/runs/r1/items?page=1&page_size=50': () => page([]),
+      'POST /api/v1/runs/r1/cancel': () => {
+        cancelled = true;
+        return jsonResponse({ ...running, cancel_requested: true }, 202);
+      },
+    });
+    renderAt('/projects/p1/runs/r1');
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByText(/Comments already posted stay/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel run' }));
+
+    expect(await screen.findByText(/Cancelling: the run stops after the current commit/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/v1/runs/r1/cancel')).toBe(true);
+  });
+
+  it('shows a cancelled run calmly', async () => {
+    baseRoutes({
+      'GET /api/v1/runs/r1': () =>
+        jsonResponse({ ...run, status: 'cancelled', error_message: 'Cancelled by the user after 1 of 5 commits.' }),
+      'GET /api/v1/runs/r1/items?page=1&page_size=50': () => page([item({ action: 'posted' })]),
+    });
+    renderAt('/projects/p1/runs/r1');
+    expect(await screen.findByText('Cancelled by the user after 1 of 5 commits.')).toBeInTheDocument();
+    expect(screen.getAllByText('Cancelled').length).toBeGreaterThan(0);
+    expect(await screen.findByRole('table', { name: 'Run items' })).toBeInTheDocument();
   });
 
   it('reports a run that is not found', async () => {

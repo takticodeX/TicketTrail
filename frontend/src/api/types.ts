@@ -125,16 +125,31 @@ export interface Project {
   dry_run_default: boolean;
   created_at: string;
   updated_at: string;
+  // The dashboard summary, computed by the API.
+  last_run?: SyncRun | null;
+  /** Next scheduled run (UTC), when the schedule is on. */
+  next_run_at?: string | null;
+  comments_posted?: number;
 }
 
-export type ProjectInput = Omit<Project, 'id' | 'created_at' | 'updated_at'>;
+export type ProjectInput = Omit<
+  Project,
+  'id' | 'created_at' | 'updated_at' | 'last_run' | 'next_run_at' | 'comments_posted'
+>;
 
 export interface PatternTestResponse {
   pattern: string;
   results: { ids: number[]; error: string | null }[];
 }
 
-export type RunStatus = 'queued' | 'running' | 'success' | 'partial' | 'failed' | 'skipped';
+export type RunStatus =
+  | 'queued'
+  | 'running'
+  | 'success'
+  | 'partial'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled';
 export type RunTrigger = 'manual' | 'scheduled';
 export type ItemAction =
   | 'posted'
@@ -159,6 +174,8 @@ export interface SyncRun {
   errors: number;
   /** Why the run failed, or warnings for a partial run. */
   error_message: string | null;
+  /** The user asked to cancel; a running run stops at the next commit. */
+  cancel_requested: boolean;
 }
 
 export interface SyncRunDetail extends SyncRun {
