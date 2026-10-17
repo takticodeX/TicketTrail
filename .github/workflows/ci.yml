@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "milestone/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint, types, tests)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.13.1"  # the version that wrote uv.lock
+      - name: Install Python 3.12 and dependencies
+        run: uv sync --python 3.12 --frozen
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Type-check
+        run: uv run mypy
+      - name: Tests (Postgres and Redis via testcontainers)
+        run: uv run pytest --cov=app --cov-report=term
+      - name: Coverage of sync/ and integrations/ is at least 80%
+        run: uv run coverage report --include="app/sync/*,app/integrations/*" --fail-under=80
+
+  frontend:
+    name: Frontend (lint, types, tests, build)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint -- --max-warnings 0
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  images-and-e2e:
+    name: Images and end-to-end test
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend]
+    env:
+      TT_HTTP_PORT: "8091"
+      COMPOSE_FILES: -f docker-compose.yml -f docker-compose.e2e.yml
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write a throwaway .env
+        run: |
+          key() { python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"; }
+          cp .env.example .env
+          sed -i "s|^TT_ENCRYPTION_KEY=.*|TT_ENCRYPTION_KEY=$(key)|; s|^TT_JWT_SECRET=.*|TT_JWT_SECRET=$(key)|" .env
+      - name: Build the images
+        run: docker compose build
+      - name: Start the e2e stack
+        run: docker compose -p tickettrail-e2e $COMPOSE_FILES up -d --wait --wait-timeout 300
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Playwright
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: End-to-end test
+        working-directory: frontend
+        run: npx playwright test
+        env:
+          CI: "true"
+      - name: Secret-leak check (logs and database)
+        run: sh scripts/secret-leak-check.sh -p tickettrail-e2e e2e-azure-pat-canary e2e-password-123
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -p tickettrail-e2e $COMPOSE_FILES logs --no-color
+      - name: Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+      - name: Stop the stack
+        if: always()
+        run: docker compose -p tickettrail-e2e $COMPOSE_FILES down -v
