@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Alert, Button, Group, Stack, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { applyServerErrors, errorMessage } from '../../api/errors';
@@ -38,6 +38,8 @@ export function AzureConnectionForm({ connection, onSaved, onClose }: Props) {
   const test = useTestAzureConnection();
   const [formError, setFormError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<AzureTestResult | null>(null);
+  const hasSavedSecret = useRef(Boolean(connection?.has_secret));
+  hasSavedSecret.current = Boolean(connection?.has_secret);
 
   const {
     register,
@@ -46,7 +48,13 @@ export function AzureConnectionForm({ connection, onSaved, onClose }: Props) {
     reset,
     formState: { errors, isDirty, isSubmitting },
   } = useForm<AzureConnectionValues>({
-    resolver: zodResolver(azureConnectionSchema({ hasSavedSecret: Boolean(connection?.has_secret) })),
+    // Read at validation time: after the first save a PAT is stored, so it may stay empty.
+    resolver: (values, context, options) =>
+      zodResolver(azureConnectionSchema({ hasSavedSecret: hasSavedSecret.current }))(
+        values,
+        context,
+        options,
+      ),
     defaultValues: {
       name: connection?.name ?? '',
       organization_url: connection?.organization_url ?? '',

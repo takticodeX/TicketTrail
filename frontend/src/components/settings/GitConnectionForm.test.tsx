@@ -1,5 +1,6 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { GitConnection } from '../../api/types';
@@ -80,6 +81,28 @@ describe('GitConnectionForm', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(bodyOf(fetchMock.mock.calls[0]?.[1])).not.toHaveProperty('secret');
+  });
+
+  it('shows the test result after "Save and test" on a new connection', async () => {
+    // Found by the end-to-end test: the result used to vanish when the form switched to edit mode.
+    mockFetch({
+      'POST /api/v1/git-connections': [jsonResponse(saved, 201)],
+      'POST /api/v1/git-connections/g1/test': [
+        jsonResponse({ ok: true, branches: ['main'], default_branch: 'main', error: null }),
+      ],
+      'GET /api/v1/git-connections?page_size=100': () =>
+        jsonResponse({ items: [saved], total: 1, page: 1, page_size: 100 }),
+    });
+    function Harness() {
+      const [connection, setConnection] = useState<GitConnection | null>(null);
+      return <GitConnectionForm connection={connection} onSaved={setConnection} onClose={vi.fn()} />;
+    }
+    renderWithProviders(<Harness />);
+    await userEvent.type(screen.getByLabelText('Name'), 'App repo');
+    await userEvent.type(screen.getByLabelText('Repository URL'), 'https://github.com/acme/app.git');
+    await userEvent.type(screen.getByLabelText('Access token'), 'ghp_secret');
+    await userEvent.click(screen.getByRole('button', { name: 'Save and test' }));
+    expect(await screen.findByText('Connection works')).toBeInTheDocument();
   });
 
   it('rejects http URLs before saving', async () => {

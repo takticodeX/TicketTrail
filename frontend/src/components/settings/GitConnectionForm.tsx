@@ -48,6 +48,8 @@ export function GitConnectionForm({ connection, onSaved, onClose }: Props) {
   const [testResult, setTestResult] = useState<GitTestResult | null>(null);
   // Prefill the username for the detected host until the user types their own.
   const usernameEdited = useRef(Boolean(connection));
+  const hasSavedSecret = useRef(Boolean(connection?.has_secret));
+  hasSavedSecret.current = Boolean(connection?.has_secret);
 
   const {
     register,
@@ -59,7 +61,13 @@ export function GitConnectionForm({ connection, onSaved, onClose }: Props) {
     reset,
     formState: { errors, isDirty, isSubmitting },
   } = useForm<GitConnectionValues>({
-    resolver: zodResolver(gitConnectionSchema({ hasSavedSecret: Boolean(connection?.has_secret) })),
+    // Read at validation time: after the first save a secret is stored, so it may stay empty.
+    resolver: (values, context, options) =>
+      zodResolver(gitConnectionSchema({ hasSavedSecret: hasSavedSecret.current }))(
+        values,
+        context,
+        options,
+      ),
     defaultValues: {
       name: connection?.name ?? '',
       repo_url: connection?.repo_url ?? '',

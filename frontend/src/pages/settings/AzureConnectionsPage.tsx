@@ -14,6 +14,12 @@ export function AzureConnectionsPage() {
   const query = useAzureConnections();
   const remove = useDeleteAzureConnection();
   const [editing, setEditing] = useState<AzureConnection | 'new' | null>(null);
+  // A new key each time the drawer opens; saving keeps the same form (and its test result).
+  const [formKey, setFormKey] = useState(0);
+  const open = (target: AzureConnection | 'new') => {
+    setEditing(target);
+    setFormKey((key) => key + 1);
+  };
 
   const onDelete = (connection: AzureConnection) =>
     confirmDelete({
@@ -33,7 +39,7 @@ export function AzureConnectionsPage() {
         description="Azure DevOps boards that receive the commit comments."
         query={query}
         addLabel="Add Azure connection"
-        onAdd={() => setEditing('new')}
+        onAdd={() => open('new')}
         emptyText="No Azure connections yet. Add the board whose work items should get the comments."
         head={
           <Table.Tr>
@@ -47,7 +53,7 @@ export function AzureConnectionsPage() {
         renderRow={(connection) => (
           <Table.Tr key={connection.id}>
             <Table.Td>
-              <Anchor component="button" type="button" onClick={() => setEditing(connection)} fw={500}>
+              <Anchor component="button" type="button" onClick={() => open(connection)} fw={500}>
                 {connection.name}
               </Anchor>
             </Table.Td>
@@ -62,7 +68,7 @@ export function AzureConnectionsPage() {
             </Table.Td>
             <Table.Td>
               <Group gap="xs" justify="flex-end" wrap="nowrap">
-                <Button size="xs" variant="default" onClick={() => setEditing(connection)}>
+                <Button size="xs" variant="default" onClick={() => open(connection)}>
                   Edit
                 </Button>
                 <Button size="xs" variant="subtle" color="red" onClick={() => onDelete(connection)}>
@@ -82,7 +88,7 @@ export function AzureConnectionsPage() {
       >
         {editing !== null && (
           <AzureConnectionForm
-            key={editing === 'new' ? 'new' : editing.id}
+            key={formKey}
             connection={editing === 'new' ? null : editing}
             onSaved={setEditing}
             onClose={() => setEditing(null)}

@@ -17,6 +17,12 @@ export function GitConnectionsPage() {
   const query = useGitConnections();
   const remove = useDeleteGitConnection();
   const [editing, setEditing] = useState<GitConnection | 'new' | null>(null);
+  // A new key each time the drawer opens; saving keeps the same form (and its test result).
+  const [formKey, setFormKey] = useState(0);
+  const open = (target: GitConnection | 'new') => {
+    setEditing(target);
+    setFormKey((key) => key + 1);
+  };
 
   const onDelete = (connection: GitConnection) =>
     confirmDelete({
@@ -36,7 +42,7 @@ export function GitConnectionsPage() {
         description="Repositories TicketTrail reads commits from, over HTTPS."
         query={query}
         addLabel="Add Git connection"
-        onAdd={() => setEditing('new')}
+        onAdd={() => open('new')}
         emptyText="No Git connections yet. Add the repository whose commits should be posted."
         head={
           <Table.Tr>
@@ -50,7 +56,7 @@ export function GitConnectionsPage() {
         renderRow={(connection) => (
           <Table.Tr key={connection.id}>
             <Table.Td>
-              <Anchor component="button" type="button" onClick={() => setEditing(connection)} fw={500}>
+              <Anchor component="button" type="button" onClick={() => open(connection)} fw={500}>
                 {connection.name}
               </Anchor>
             </Table.Td>
@@ -68,7 +74,7 @@ export function GitConnectionsPage() {
             </Table.Td>
             <Table.Td>
               <Group gap="xs" justify="flex-end" wrap="nowrap">
-                <Button size="xs" variant="default" onClick={() => setEditing(connection)}>
+                <Button size="xs" variant="default" onClick={() => open(connection)}>
                   Edit
                 </Button>
                 <Button size="xs" variant="subtle" color="red" onClick={() => onDelete(connection)}>
@@ -88,7 +94,7 @@ export function GitConnectionsPage() {
       >
         {editing !== null && (
           <GitConnectionForm
-            key={editing === 'new' ? 'new' : editing.id}
+            key={formKey}
             connection={editing === 'new' ? null : editing}
             onSaved={setEditing}
             onClose={() => setEditing(null)}
