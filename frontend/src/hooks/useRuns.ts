@@ -49,6 +49,28 @@ export function useStartSync(projectId: string) {
   });
 }
 
+export function useDeleteRun(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteRun,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: runKeys.list(projectId) });
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+export function useClearDryRuns(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.deleteRuns(projectId, true),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: runKeys.list(projectId) });
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 export function useCancelRun(runId: string) {
   const queryClient = useQueryClient();
   return useMutation({

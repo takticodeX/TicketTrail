@@ -19,12 +19,13 @@ import {
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { errorMessage } from '../api/errors';
 import type { ItemAction, SyncRunDetail } from '../api/types';
+import { confirmDelete } from '../components/confirmDelete';
 import { RunStatusBadge } from '../components/RunStatusBadge';
-import { useCancelRun, useRun, useRunItems } from '../hooks/useRuns';
+import { useCancelRun, useDeleteRun, useRun, useRunItems } from '../hooks/useRuns';
 import { useAzureConnections, useGitConnections, useProject } from '../hooks/useSettings';
 import {
   ACTION_COLORS,
@@ -79,6 +80,8 @@ export function RunDetailPage() {
   const live = run.data ? isRunActive(run.data) : false;
   const items = useRunItems(runId, page, action, live);
   const cancel = useCancelRun(runId);
+  const remove = useDeleteRun(projectId);
+  const navigate = useNavigate();
 
   // Reload the items once more when the run finishes, so the last ones show up.
   const status = run.data?.status;
@@ -108,6 +111,19 @@ export function RunDetailPage() {
   const failed = run.data.status === 'failed';
   const cancelled = run.data.status === 'cancelled';
 
+  const onDelete = () =>
+    confirmDelete({
+      title: run.data.dry_run ? 'Delete dry run' : 'Delete run',
+      message:
+        'Remove this run and its commit list from the history? Nothing changes in Azure DevOps, ' +
+        'and comments already posted are never posted again.',
+      onConfirm: () =>
+        remove.mutate(runId, {
+          onSuccess: () => navigate(`/projects/${projectId}`),
+          onError: (error) => notifications.show({ color: 'red', message: errorMessage(error) }),
+        }),
+    });
+
   const onCancel = () =>
     modals.openConfirmModal({
       title: 'Cancel this run?',
@@ -136,9 +152,16 @@ export function RunDetailPage() {
         <Anchor component={Link} to={`/projects/${projectId}`} size="sm">
           ← {project.data?.name ?? 'Project'}
         </Anchor>
-        <Group gap="sm" align="center">
-          <Title order={2}>{run.data.dry_run ? 'Dry run' : 'Sync'}</Title>
-          <RunStatusBadge status={run.data.status} />
+        <Group justify="space-between" align="center">
+          <Group gap="sm" align="center">
+            <Title order={2}>{run.data.dry_run ? 'Dry run' : 'Sync'}</Title>
+            <RunStatusBadge status={run.data.status} />
+          </Group>
+          {!live && (
+            <Button size="xs" variant="subtle" color="red" onClick={onDelete} loading={remove.isPending}>
+              Delete run
+            </Button>
+          )}
         </Group>
         <Text size="sm" c="dimmed">
           Started {formatDateTime(run.data.started_at ?? run.data.created_at)}

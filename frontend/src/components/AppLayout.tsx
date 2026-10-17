@@ -96,6 +96,17 @@ export function AppLayout() {
             />
           ))}
         </NavLink>
+        {user?.role === 'admin' && (
+          <NavLink label="Admin" defaultOpened childrenOffset="sm" active={false}>
+            <NavLink
+              component={Link}
+              to="/admin/users"
+              label="Users"
+              active={pathname.startsWith('/admin/users')}
+              onClick={close}
+            />
+          </NavLink>
+        )}
       </AppShell.Navbar>
 
       <AppShell.Main>

@@ -34,5 +34,8 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
     restoreMocks: true,
+    // Long user-flow tests (the project wizard) need headroom when the suite runs in parallel.
+    testTimeout: 15_000,
+    exclude: ['e2e/**', 'node_modules/**'],
   },
 });

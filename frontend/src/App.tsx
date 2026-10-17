@@ -1,7 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { AppLayout } from './components/AppLayout';
-import { RedirectIfAuthenticated, RequireAuth } from './components/RequireAuth';
+import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './components/RequireAuth';
+import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -56,6 +57,14 @@ export function AppRoutes() {
           <Route path="azure" element={<AzureConnectionsPage />} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>
+        <Route
+          path="admin/users"
+          element={
+            <RequireAdmin fallback={<NotFoundPage />}>
+              <AdminUsersPage />
+            </RequireAdmin>
+          }
+        />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

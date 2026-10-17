@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -106,6 +106,39 @@ describe('ProjectDetailPage', () => {
     expect(await screen.findByRole('heading', { name: 'Dry run' })).toBeInTheDocument();
     const sync = fetchMock.mock.calls.find(([url]) => url === '/api/v1/projects/p1/sync');
     expect(JSON.parse(String(sync?.[1]?.body))).toEqual({ dry_run: true });
+  });
+});
+
+describe('deleting run history', () => {
+  it('deletes one run after confirming', async () => {
+    let runs: SyncRun[] = [run];
+    const fetchMock = baseRoutes({
+      'GET /api/v1/projects/p1/runs?page=1&page_size=20': () => page<SyncRun>(runs),
+      'DELETE /api/v1/runs/r1': () => {
+        runs = [];
+        return new Response(null, { status: 204 });
+      },
+    });
+    renderAt('/projects/p1');
+    await userEvent.click(await screen.findByRole('button', { name: /^Delete run of/ }));
+    expect(await screen.findByText(/never posted again/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(await screen.findByText(/No runs yet/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/v1/runs/r1' && init?.method === 'DELETE')).toBe(true);
+  });
+
+  it('clears all dry runs at once', async () => {
+    const fetchMock = baseRoutes({
+      'GET /api/v1/projects/p1/runs?page=1&page_size=20': () => page<SyncRun>([run]),
+      'DELETE /api/v1/projects/p1/runs?dry_run=true': () => jsonResponse({ deleted: 1 }),
+    });
+    renderAt('/projects/p1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Clear dry runs' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => url === '/api/v1/projects/p1/runs?dry_run=true')).toBe(true),
+    );
   });
 });
 

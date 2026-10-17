@@ -13,17 +13,20 @@ import {
   Text,
   Title,
 } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { errorMessage } from '../api/errors';
+import type { SyncRun } from '../api/types';
+import { confirmDelete } from '../components/confirmDelete';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { SyncNowButton } from '../components/SyncNowButton';
 import { useAuth } from '../hooks/useAuth';
 import { useDryRun } from '../hooks/useDryRun';
-import { useRuns } from '../hooks/useRuns';
+import { useClearDryRuns, useDeleteRun, useRuns } from '../hooks/useRuns';
 import { useAzureConnections, useGitConnections, useProject } from '../hooks/useSettings';
-import { formatDateTime, runDuration } from '../lib/runs';
+import { formatDateTime, isRunActive, runDuration } from '../lib/runs';
 import { formatRunTime } from '../lib/schedule';
 
 const PAGE_SIZE = 20;
@@ -38,6 +41,8 @@ export function ProjectDetailPage() {
   const [page, setPage] = useState(1);
   const runs = useRuns(projectId, page);
   const dryRun = useDryRun(projectId);
+  const deleteRun = useDeleteRun(projectId);
+  const clearDryRuns = useClearDryRuns(projectId);
 
   if (project.isPending) {
     return (
@@ -56,6 +61,33 @@ export function ProjectDetailPage() {
 
   const gitConnection = git.data?.items.find((c) => c.id === project.data.git_connection_id);
   const azureConnection = azure.data?.items.find((c) => c.id === project.data.azure_connection_id);
+
+  const onDeleteRun = (run: SyncRun) =>
+    confirmDelete({
+      title: run.dry_run ? 'Delete dry run' : 'Delete run',
+      message:
+        'Remove this run and its commit list from the history? Nothing changes in Azure DevOps, ' +
+        'and comments already posted are never posted again.',
+      onConfirm: () =>
+        deleteRun.mutate(run.id, {
+          onError: (error) => notifications.show({ color: 'red', message: errorMessage(error) }),
+        }),
+    });
+
+  const onClearDryRuns = () =>
+    confirmDelete({
+      title: 'Clear dry runs',
+      message: 'Delete every finished dry run of this project from the history? Real syncs stay.',
+      onConfirm: () =>
+        clearDryRuns.mutate(undefined, {
+          onSuccess: ({ deleted }) =>
+            notifications.show({
+              color: 'teal',
+              message: `Deleted ${deleted} dry ${deleted === 1 ? 'run' : 'runs'}.`,
+            }),
+          onError: (error) => notifications.show({ color: 'red', message: errorMessage(error) }),
+        }),
+    });
 
   const totalPages = runs.data ? Math.max(1, Math.ceil(runs.data.total / PAGE_SIZE)) : 1;
 
@@ -89,7 +121,14 @@ export function ProjectDetailPage() {
           ` Next scheduled run: ${formatRunTime(new Date(project.data.next_run_at), timeZone)}.`}
       </Text>
 
-      <Title order={4}>Run history</Title>
+      <Group justify="space-between">
+        <Title order={4}>Run history</Title>
+        {runs.data?.items.some((run) => run.dry_run && !isRunActive(run)) && (
+          <Button size="xs" variant="subtle" color="red" onClick={onClearDryRuns} loading={clearDryRuns.isPending}>
+            Clear dry runs
+          </Button>
+        )}
+      </Group>
       {runs.isError && (
         <Alert color="red" variant="light" role="alert">
           {errorMessage(runs.error)}
@@ -115,6 +154,7 @@ export function ProjectDetailPage() {
                   <Table.Th ta="right">Comments</Table.Th>
                   <Table.Th ta="right">Errors</Table.Th>
                   <Table.Th>Duration</Table.Th>
+                  <Table.Th aria-label="Actions" />
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -142,6 +182,19 @@ export function ProjectDetailPage() {
                     <Table.Td ta="right">{run.comments_posted}</Table.Td>
                     <Table.Td ta="right">{run.errors}</Table.Td>
                     <Table.Td>{runDuration(run) ?? '—'}</Table.Td>
+                    <Table.Td>
+                      {!isRunActive(run) && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          color="red"
+                          aria-label={`Delete run of ${formatDateTime(run.started_at ?? run.created_at)}`}
+                          onClick={() => onDeleteRun(run)}
+                        >
+                          Delete
+                        </Button>
+                      )}
+                    </Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>

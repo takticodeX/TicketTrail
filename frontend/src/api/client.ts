@@ -2,6 +2,15 @@ import type { ErrorBody, TokenResponse } from './types';
 
 export const API_BASE = '/api/v1';
 
+/**
+ * Sent on every request. The API requires X-Requested-With on refresh and logout:
+ * another site can make the browser send the refresh cookie, but not this header.
+ */
+export const BASE_HEADERS: Readonly<Record<string, string>> = {
+  Accept: 'application/json',
+  'X-Requested-With': 'TicketTrail',
+};
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -63,7 +72,7 @@ function postRefresh(): Promise<Response> {
   return fetch(`${API_BASE}/auth/refresh`, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { Accept: 'application/json' },
+    headers: { ...BASE_HEADERS },
   });
 }
 
@@ -113,7 +122,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const { method = 'GET', body, auth = true, signal } = options;
 
   const send = (token: string | null): Promise<Response> => {
-    const headers: Record<string, string> = { Accept: 'application/json' };
+    const headers: Record<string, string> = { ...BASE_HEADERS };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (auth && token) headers.Authorization = `Bearer ${token}`;
     return fetch(`${API_BASE}${path}`, {
