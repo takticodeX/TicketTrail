@@ -435,3 +435,18 @@ def test_projects_carry_the_dashboard_summary(
         client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()["next_run_at"]
         is None
     )
+
+
+def test_the_dashboard_ignores_skipped_runs(
+    client: TestClient,
+    headers: dict[str, str],
+    origin: FixtureRepo,
+    project_for: Any,
+    redis: Redis,
+) -> None:
+    project = project_for(origin)
+    client.post(f"/api/v1/projects/{project['id']}/sync", headers=headers, json={})
+    redis.set(lock_key(uuid.UUID(project["id"])), "another-run")
+    client.post(f"/api/v1/projects/{project['id']}/sync", headers=headers, json={})  # skipped
+    summary = client.get(f"/api/v1/projects/{project['id']}", headers=headers).json()
+    assert summary["last_run"]["status"] == "success"

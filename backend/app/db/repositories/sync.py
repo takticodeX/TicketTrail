@@ -160,12 +160,16 @@ def close_stale_runs(
 def project_summaries(
     session: Session, project_ids: Sequence[uuid.UUID]
 ) -> dict[uuid.UUID, tuple[SyncRun | None, int]]:
-    """Each project's latest run and number of comments posted. The caller owns the projects."""
+    """Each project's latest run and number of comments posted. The caller owns the projects.
+
+    Skipped runs (an overlap with another run) are left out: they would hide the
+    result of the run that actually did the work.
+    """
     if not project_ids:
         return {}
     latest = session.scalars(
         select(SyncRun)
-        .where(SyncRun.project_id.in_(project_ids))
+        .where(SyncRun.project_id.in_(project_ids), SyncRun.status != RunStatus.SKIPPED)
         .order_by(SyncRun.project_id, SyncRun.created_at.desc())
         .distinct(SyncRun.project_id)
     ).all()
