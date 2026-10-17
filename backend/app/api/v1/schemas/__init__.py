@@ -29,6 +29,13 @@ from app.api.v1.schemas.projects import (
     ProjectResponse,
     ProjectUpdate,
 )
+from app.api.v1.schemas.runs import (
+    RunDetailResponse,
+    RunItemResponse,
+    RunResponse,
+    SyncRequest,
+    SyncStarted,
+)
 
 __all__ = [
     "DEFAULT_PAGE_SIZE",
@@ -53,6 +60,11 @@ __all__ = [
     "ProjectUpdate",
     "ReadyResponse",
     "RegisterRequest",
+    "RunDetailResponse",
+    "RunItemResponse",
+    "RunResponse",
+    "SyncRequest",
+    "SyncStarted",
     "TokenResponse",
     "UserResponse",
     "UserUpdateRequest",

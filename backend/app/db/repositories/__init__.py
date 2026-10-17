@@ -7,13 +7,16 @@ from app.db.repositories.owned import (
     ProjectRepository,
 )
 from app.db.repositories.refresh_tokens import RefreshTokenRepository
+from app.db.repositories.sync import CursorRepository, SyncRunRepository
 from app.db.repositories.users import UserRepository
 
 __all__ = [
     "AzureConnectionRepository",
+    "CursorRepository",
     "GitConnectionRepository",
     "OwnedRepository",
     "ProjectRepository",
     "RefreshTokenRepository",
+    "SyncRunRepository",
     "UserRepository",
 ]

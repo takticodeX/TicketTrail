@@ -2,7 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, azure_connections, git_connections, health, me, projects
+from app.api.v1 import auth, azure_connections, git_connections, health, me, projects, runs
 from app.core.errors import ErrorResponse
 
 _ERRORS: dict[int | str, dict[str, Any]] = {
@@ -36,3 +36,10 @@ _CONNECTION_ERRORS = {
 api_router.include_router(git_connections.router, responses=_CONNECTION_ERRORS)
 api_router.include_router(azure_connections.router, responses=_CONNECTION_ERRORS)
 api_router.include_router(projects.router, responses=_RESOURCE_ERRORS)
+api_router.include_router(
+    runs.router,
+    responses={
+        **_RESOURCE_ERRORS,
+        503: {"model": ErrorResponse, "description": "The task queue is unavailable"},
+    },
+)

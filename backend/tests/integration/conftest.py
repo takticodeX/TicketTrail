@@ -70,19 +70,35 @@ def _clean_tables(request: pytest.FixtureRequest) -> Iterator[None]:
 
 
 @pytest.fixture
+def no_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Treat every host as public, so tests don't depend on real DNS (or have file:// hosts)."""
+    from app.sync import engine
+    from app.worker import connection_checks
+
+    monkeypatch.setattr(connection_checks, "check_public_host", lambda *_, **__: None)
+    monkeypatch.setattr(engine, "check_public_host", lambda *_, **__: None)
+
+
+@pytest.fixture
 def app_factory(
-    migrated_database_url: str, make_settings: Callable[..., Settings], db_engine: Engine
+    migrated_database_url: str,
+    make_settings: Callable[..., Settings],
+    db_engine: Engine,
+    tmp_path: Path,
 ) -> Iterator[Callable[..., FastAPI]]:
     created: list[FastAPI] = []
 
     def factory(**overrides: Any) -> FastAPI:
         app = create_app(make_settings(database_url=migrated_database_url, **overrides))
-        # Run worker tasks in-process against the test database instead of via Redis.
+        # Run worker tasks in-process against the test database instead of via Redis,
+        # syncing from file:// fixture repositories into a temp directory.
         app.state.task_runner = InProcessTaskRunner(
             WorkerContext(
                 settings=app.state.settings,
                 session_factory=app.state.session_factory,
                 secret_box=app.state.secret_box,
+                repos_dir=tmp_path / "repos",
+                git_protocols="file",
             )
         )
         created.append(app)

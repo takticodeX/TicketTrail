@@ -7,8 +7,11 @@ on the command line (visible in the process list) or in logs.
 
 import base64
 import re
+import shutil
 import sys
 from dataclasses import dataclass, field
+from datetime import date, datetime
+from pathlib import Path
 
 from git.cmd import Git
 from git.exc import GitCommandError
@@ -30,6 +33,55 @@ class GitCredentials:
 class RemoteInfo:
     branches: list[str] = field(default_factory=list)
     default_branch: str | None = None
+
+
+@dataclass(frozen=True)
+class Commit:
+    sha: str
+    author_name: str
+    author_email: str
+    author_date: datetime
+    committer_date: datetime
+    subject: str
+    message: str  # subject and body
+    parent_count: int
+
+    @property
+    def is_merge(self) -> bool:
+        return self.parent_count > 1
+
+    @property
+    def body(self) -> str:
+        return self.message.partition("\n")[2].strip()
+
+
+# NUL between fields and \x1e after each commit: neither appears in commit metadata.
+_FIELD = "\x00"
+_RECORD_END = "\x1e"
+_LOG_FORMAT = "%H%x00%an%x00%ae%x00%aI%x00%cI%x00%P%x00%B%x1e"
+
+
+def _parse_commit(record: str) -> Commit:
+    sha, author_name, author_email, author_date, committer_date, parents, message = record.lstrip(
+        "\n"
+    ).split(_FIELD, 6)
+    message = message.strip()
+    return Commit(
+        sha=sha,
+        author_name=author_name,
+        author_email=author_email,
+        author_date=datetime.fromisoformat(author_date),
+        committer_date=datetime.fromisoformat(committer_date),
+        subject=message.partition("\n")[0].strip(),
+        message=message,
+        parent_count=len(parents.split()),
+    )
+
+
+def _text(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value or "")
 
 
 class GitError(Exception):
@@ -120,25 +172,39 @@ class GitClient:
             env[f"GIT_CONFIG_VALUE_{index}"] = value
         return env
 
-    def _run(self, *args: str) -> str:
-        secret = self._credentials.secret if self._credentials else ""
+    def _execute(self, args: tuple[str, ...], cwd: Path | None) -> str:
         # GitPython can't kill on timeout on Windows (dev machines only; the
         # containers run Linux). http.lowSpeedTime still bounds network stalls there.
         kill_after = None if sys.platform == "win32" else self._timeout
+        output = Git(cwd).execute(
+            ["git", *args],
+            env=self._env(),
+            kill_after_timeout=kill_after,
+            stdout_as_string=False,
+        )
+        # Commit messages aren't always valid UTF-8; never let one break a run.
+        return (
+            output.decode("utf-8", errors="replace") if isinstance(output, bytes) else str(output)
+        )
+
+    def _run(self, *args: str, cwd: Path | None = None) -> str:
+        secret = self._credentials.secret if self._credentials else ""
         try:
-            output: str = Git().execute(
-                ["git", *args],
-                env=self._env(),
-                kill_after_timeout=kill_after,
-                stdout_as_string=True,
-            )
+            return self._execute(args, cwd)
         except GitCommandError as exc:
-            stderr = scrub(str(exc.stderr or ""), secret).strip()
+            stderr = scrub(_text(exc.stderr), secret).strip()
             if "did not complete in" in stderr or "timed out" in stderr.lower():
                 raise GitTimeoutError(f"git timed out after {self._timeout:g} s") from None
             message = stderr.removeprefix("stderr:").strip(" '\n") or "git command failed"
             raise _classify(stderr)(message) from None
-        return output
+
+    def _succeeds(self, *args: str, cwd: Path) -> bool:
+        """For commands that answer yes/no through their exit status."""
+        try:
+            self._execute(args, cwd)
+        except GitCommandError:
+            return False
+        return True
 
     def ls_remote(self, url: str) -> RemoteInfo:
         """List the remote's branches and its default branch (HEAD)."""
@@ -155,3 +221,46 @@ class GitClient:
             if ref.startswith("refs/heads/"):
                 branches.append(ref.removeprefix("refs/heads/"))
         return RemoteInfo(branches=sorted(branches), default_branch=default_branch)
+
+    # --- Local mirror ----------------------------------------------------------------------
+
+    def mirror(self, url: str, path: Path) -> None:
+        """Mirror-clone the remote into `path` the first time, then only fetch."""
+        if (path / "HEAD").is_file():
+            self._run("remote", "set-url", "origin", url, cwd=path)  # the URL may have changed
+            self._run("fetch", "--prune", "--quiet", "origin", cwd=path)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        partial = path.with_name(path.name + ".partial")
+        if partial.exists():
+            shutil.rmtree(partial)
+        self._run("clone", "--mirror", "--quiet", url, str(partial))
+        partial.rename(path)  # never leave a half-cloned mirror at the real path
+
+    def has_branch(self, path: Path, branch: str) -> bool:
+        return self._succeeds(
+            "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}", cwd=path
+        )
+
+    def is_ancestor(self, path: Path, sha: str, branch: str) -> bool:
+        """False also when `sha` doesn't exist (for example after a force-push)."""
+        return self._succeeds("merge-base", "--is-ancestor", sha, f"refs/heads/{branch}", cwd=path)
+
+    def has_commit(self, path: Path, sha: str) -> bool:
+        return self._succeeds("cat-file", "-e", f"{sha}^{{commit}}", cwd=path)
+
+    def list_commits(
+        self,
+        path: Path,
+        branch: str,
+        *,
+        after_sha: str | None = None,
+        since: date | None = None,
+    ) -> list[Commit]:
+        """Commits on `branch`, oldest first: after `after_sha`, or from `since` on."""
+        revision = f"{after_sha}..refs/heads/{branch}" if after_sha else f"refs/heads/{branch}"
+        args = ["log", "--reverse", "--no-color", f"--format={_LOG_FORMAT}"]
+        if since is not None:
+            args.append(f"--since={since.isoformat()} 00:00:00 +0000")
+        output = self._run(*args, revision, "--", cwd=path)
+        return [_parse_commit(record) for record in output.split(_RECORD_END) if record.strip()]
