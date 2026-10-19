@@ -16,6 +16,9 @@ x-backend: &backend
   build: ./backend
   image: localhost/tickettrail-backend:latest
   env_file: .env
+  environment:
+    # Built from TT_DB_PASSWORD unless TT_DATABASE_URL is set explicitly in .env.
+    TT_DATABASE_URL: ${TT_DATABASE_URL:-postgresql+psycopg://tt:${TT_DB_PASSWORD:-tt}@db:5432/tickettrail}
   restart: unless-stopped
   depends_on:
     db:
@@ -95,7 +98,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: tt
-      POSTGRES_PASSWORD: tt
+      # Only read when the database is first created; see README "First start".
+      POSTGRES_PASSWORD: ${TT_DB_PASSWORD:-tt}
       POSTGRES_DB: tickettrail
     volumes:
       - pg_data:/var/lib/postgresql/data

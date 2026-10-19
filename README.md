@@ -15,7 +15,7 @@ The design is described in [SPEC.md](SPEC.md).
 
 ## Contents
 
-1. [Install](#1-install)
+1. [Install](#1-install) (including [First start: change the defaults](#first-start-change-the-defaults))
 2. [First steps](#2-first-steps)
 3. [Access tokens: minimum scopes per host](#3-access-tokens-minimum-scopes-per-host)
 4. [Configuration](#4-configuration)
@@ -39,17 +39,46 @@ cd tickettrail
 cp .env.example .env
 ```
 
-Generate the two required secrets and paste them into `.env` as `TT_ENCRYPTION_KEY` and
-`TT_JWT_SECRET`. Run this twice, once per secret (any machine with Python 3):
+### First start: change the defaults
+
+The repository ships with placeholder values that are the same for everyone who clones
+it. Before you start the stack for the first time, edit `.env` and set:
+
+| Setting | Default | What to do |
+| --- | --- | --- |
+| `TT_ENCRYPTION_KEY` | placeholder (the stack refuses to start) | Generate one (command below) |
+| `TT_JWT_SECRET` | placeholder (the stack refuses to start) | Generate one (command below) |
+| `TT_DB_PASSWORD` | `tt` | **Change it.** Use letters and digits only, at least 20 characters |
+| `TT_PUBLIC_URL` | `http://localhost:8080` | The address your users will open |
+
+Generate each secret, and a database password, with (any machine with Python 3):
 
 ```sh
 python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+python3 -c "import secrets; print(secrets.token_hex(24))"   # for TT_DB_PASSWORD
 ```
 
 Keep `.env` private and back it up (see [section 6](#6-backups-and-restore)): without
 `TT_ENCRYPTION_KEY` the stored tokens can't be decrypted.
 
-Start the stack:
+The database password matters even though the database isn't published outside the
+stack: anyone who can reach the `db` container, or who reuses a copy of this
+configuration, could otherwise log in with `tt` / `tt`.
+
+> **Postgres reads `TT_DB_PASSWORD` only when it creates the database**, on the very first
+> start. Changing `.env` afterwards does not change the password of an existing database.
+> To change it later:
+>
+> ```sh
+> docker compose exec db psql -U tt -d tickettrail -c "ALTER USER tt PASSWORD 'the-new-password'"
+> # then set TT_DB_PASSWORD=the-new-password in .env, and:
+> docker compose up -d
+> ```
+
+After the first account is created (it becomes the administrator), consider setting
+`TT_ALLOW_REGISTRATION=false` so nobody else can sign up ([section 2](#2-first-steps)).
+
+### Start
 
 ```sh
 docker compose up -d --build
@@ -130,7 +159,8 @@ All settings are environment variables in `.env` (see `.env.example`).
 | `TT_MIN_SCHEDULE_MINUTES` | `5` | Shortest allowed schedule interval |
 | `TT_AZURE_MAX_CONCURRENCY` | `5` | Concurrent requests per Azure organization, across all workers |
 | `TT_LOG_LEVEL` | `INFO` | Log level; logs are JSON and secrets are masked |
-| `TT_DATABASE_URL` | `postgresql+psycopg://tt:tt@db:5432/tickettrail` | Database connection |
+| `TT_DB_PASSWORD` | `tt` | Password of the bundled database; **change it** before the first start ([section 1](#first-start-change-the-defaults)) |
+| `TT_DATABASE_URL` | built from `TT_DB_PASSWORD` | Set only to use an external database |
 | `TT_REDIS_URL` | `redis://redis:6379/0` | Task queue, locks and login rate limits |
 
 **Self-hosted Git on your network.** TicketTrail refuses to connect to private, loopback
