@@ -9,7 +9,7 @@ TicketTrail is a Dockerized, multi-user web app. It reads commits from any Git r
 **Goals**
 
 - Each user manages their own **projects**. A project pairs one Git connection with one Azure DevOps board.
-- A project can be **shared** with other users as viewer or editor (section 4, *Access rules*). An administrator can transfer projects to another owner, for example when a colleague leaves.
+- A project can be **shared** with other users as viewer or editor, or belong to an **organization** (a team) instead of a user (section 4, *Access rules*). An administrator can transfer personal projects to another owner, for example when a colleague leaves.
 - Git access works with any HTTPS Git host: Azure Repos (the first target), GitHub, GitLab, Bitbucket, Gitea and self-hosted servers.
 - Ticket references are found with a regex pattern set per project. The default is `AB#(\d+)`.
 - A sync can run on demand ("Sync now") or on a schedule set per project.
@@ -74,14 +74,16 @@ Repository volumes: each project's repo is kept as a bare, blobless clone of its
 
 ## 4. Data model
 
-Every user-owned row carries `owner_id`. Connections are reusable: one Azure connection can serve several projects. All tables use UUID primary keys and `created_at` / `updated_at` timestamps.
+Connections and projects belong to a user (`owner_id`) or to an organization (`organization_id`): exactly one of the two is set, enforced by a check constraint, and names are unique per owner. Connections are reusable: one Azure connection can serve several projects. All tables use UUID primary keys and `created_at` / `updated_at` timestamps.
 
 | Table | Key columns | Notes |
 | --- | --- | --- |
 | `users` | `email` (unique), `password_hash`, `display_name`, timezone (IANA, default UTC), `role` (`user` \| `admin`), `is_active` | The first registered user becomes `admin` |
-| `git_connections` | `owner_id`, `name`, `repo_url`, `auth_type` (`token` \| `basic` \| `none`), `username`, `secret_enc`, commit\_url\_template (nullable), `last_test_at`, `last_test_ok` | `secret_enc` = Fernet-encrypted token or password |
-| `azure_connections` | `owner_id`, `name`, `organization_url` (e.g. `https://dev.azure.com/acme`), `azure_project`, `pat_enc`, `last_test_at`, `last_test_ok` | PAT needs the *Work Items (Read & Write)* scope |
-| `projects` | `owner_id`, `name` (unique per owner), `git_connection_id`, `azure_connection_id`, `branches` (text\[\]; empty = default branch only), `ticket_pattern` (default `AB#(\d+)`), `comment_template`, `start_from` (date or SHA), `include_merge_commits` (bool, default false), `schedule_cron` (nullable), `schedule_enabled`, `schedule_last_fired_at`, `dry_run_default` | One repo → one board. `schedule_last_fired_at` makes each schedule slot fire once (section 7) |
+| `organizations` | `name` (unique), `timezone` (IANA), `created_by_id` | A team that owns projects and connections. Deleted only when it owns nothing |
+| `organization_members` | `organization_id`, `user_id`, `role` (`admin` \| `member`) | **Unique (`organization_id`, `user_id`)**. Deleted with the organization or the user |
+| `git_connections` | `owner_id` or `organization_id`, `name`, `repo_url`, `auth_type` (`token` \| `basic` \| `none`), `username`, `secret_enc`, commit\_url\_template (nullable), `last_test_at`, `last_test_ok` | `secret_enc` = Fernet-encrypted token or password |
+| `azure_connections` | `owner_id` or `organization_id`, `name`, `organization_url` (e.g. `https://dev.azure.com/acme`), `azure_project`, `pat_enc`, `last_test_at`, `last_test_ok` | PAT needs the *Work Items (Read & Write)* scope |
+| `projects` | `owner_id` or `organization_id`, `name` (unique per owner), `git_connection_id`, `azure_connection_id`, `branches` (text\[\]; empty = default branch only), `ticket_pattern` (default `AB#(\d+)`), `comment_template`, `start_from` (date or SHA), `include_merge_commits` (bool, default false), `schedule_cron` (nullable), `schedule_enabled`, `schedule_last_fired_at`, `dry_run_default` | One repo → one board. `schedule_last_fired_at` makes each schedule slot fire once (section 7) |
 | `project_shares` | `project_id`, `user_id`, `role` (`viewer` \| `editor`) | **Unique (`project_id`, `user_id`)**. Deleted with the project or the user |
 | `sync_runs` | `project_id`, `trigger` (`manual` \| `scheduled`), `dry_run`, `status` (`queued` \| `running` \| `success` \| `partial` \| `failed` \| `skipped` \| `cancelled`), `started_at`, `finished_at`, `commits_scanned`, `comments_posted`, `skipped`, `errors`, `error_message`, `cancel_requested`, `triggered_by_id` (nullable) | One row per sync run. `triggered_by_id` is the user who started a manual run; null for scheduled runs |
 | `sync_run_items` | `sync_run_id`, `position`, `commit_sha`, `commit_subject`, `branch`, `work_item_id`, `action` (`posted` \| `would_post` \| `skipped_duplicate` \| `skipped_not_found` \| `no_reference` \| `error`), `detail` | The audit trail shown in the UI. `position` orders the items (oldest commit first) |
@@ -94,7 +96,11 @@ Every user-owned row carries `owner_id`. Connections are reusable: one Azure con
 
 **Access rules**
 
-Connections are private to their owner: every query on them filters on `owner_id`. A project is visible to its owner and to the users it is shared with. All project and run queries go through one permission check, with the roles in this order: viewer < editor < owner.
+Personal connections are private to their owner; an organization's connections are seen, used and tested by its members and changed only by its admins. Every query on connections filters on their owner. All project and run queries go through one permission check, with the roles in this order: viewer < editor < owner. A user's role on a project is:
+
+- **owner** for the owner of a personal project, and for the admins of the organization that owns the project;
+- **editor** or **viewer** when the project is shared with them with that role;
+- **viewer** for the members of the organization that owns the project, unless a share raises them to editor.
 
 | Action | Viewer | Editor | Owner |
 | --- | :---: | :---: | :---: |
@@ -108,10 +114,19 @@ Connections are private to their owner: every query on them filters on `owner_id
 
 - A user with no access gets **404**, as if the project didn't exist. A user with access but too weak a role gets **403** with the code `insufficient_role`.
 - Shared users never see or use the owner's connections directly. A project response carries secret-free summaries of its connections (name, repo URL, host, commit link pattern; organization URL and Azure project), so the UI can show them.
-- Syncs of a shared project use the owner's connections, and its schedule runs in the owner's time zone.
+- Syncs of a shared project use the owner's connections, and its schedule runs in the owner's time zone (the organization's for an organization's project; such schedules keep running whatever happens to individual accounts).
+- An organization's project uses only that organization's connections. A member who creates a project in an organization becomes its editor.
 - Project names stay unique per owner, also when an editor renames a project.
-- Anyone a project is shared with can leave it.
-- Administrators don't see other users' projects. They can list every project with its owner (no settings, no runs) and transfer projects (section 8).
+- Anyone a personal project is shared with can leave it. Removing someone from an organization (or their leaving it) also deletes their shares on its projects.
+- Administrators don't see other users' projects. They can list every project with its owner (no settings, no runs), transfer personal projects (section 8), and make a member the admin of an organization left without one.
+
+**Organizations**
+
+- Anyone can create an organization and becomes its first admin. Its time zone defaults to the creator's.
+- Admins add members by exact email, change roles and remove members; anyone can leave. The last admin can neither leave nor step down.
+- Members see each other (name and email), so a project can be shared with a member by name.
+- A personal project moves into an organization (its owner, who must be a member); an organization's project moves out to a member (its admins). The connections come along, copied when the previous owner still uses them elsewhere; a non-admin who moves a project in stays its editor.
+- An organization can be deleted only when it owns no projects and no connections.
 
 ## 5. Git integration and ticket parsing
 
@@ -206,8 +221,8 @@ A sync run is one Celery task, `sync_project(project_id, trigger, dry_run, run_i
 - **Scheduled:** each project has an optional 5-field cron expression (`schedule_cron`) and a switch (`schedule_enabled`). Celery Beat runs a dispatcher every minute, which reads the schedules from the database, so changes in the UI take effect within a minute and without a restart.
   - The dispatcher claims each due slot with an atomic update of `schedule_last_fired_at`, so a slot fires at most once, even with several schedulers. Saving a new or changed schedule sets it to "now": slots that already passed never fire.
   - The minimum interval is 5 minutes, set with `TT_MIN_SCHEDULE_MINUTES`.
-  - Cron is evaluated in the **owner's** time zone, which is stored on the user's profile and defaults to UTC.
-  - Projects of turned-off accounts are not scheduled.
+  - Cron is evaluated in the **owner's** time zone: the user's (stored on their profile, default UTC), or the organization's for an organization's project.
+  - Personal projects of turned-off accounts are not scheduled; an organization's projects always are.
   - Scheduled runs follow the project's `dry_run_default`.
 - **Dry run:** a run with `dry_run=true` does every step except posting (it does check that the work items exist). Items are recorded as `would_post`, pending rows are not recovered, and no cursors are moved.
 
@@ -252,19 +267,24 @@ The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoin
 | POST | `/auth/login` | Returns an access token (15 min) and a refresh token (7 days, httpOnly cookie) |
 | POST | `/auth/refresh` · `/auth/logout` | Rotate or revoke the refresh token. Require the header `X-Requested-With: TicketTrail` (CSRF) |
 | GET / PATCH | `/me` | Profile: name, time zone, password change |
-| GET / POST | `/git-connections` | List / create (the caller's own) |
+| GET / POST | `/git-connections` | List / create: the caller's own, or an organization's with `?organization_id=` (members list) / `organization_id` in the body (admins create) |
 | GET / PATCH / DELETE | `/git-connections/{id}` | Read / update / delete. Delete is refused (409, naming the projects) while a project uses the connection |
 | POST | `/git-connections/{id}/test` | Runs `git ls-remote` in the worker, returns `{ok, branches[], default_branch, error}` |
-| GET / POST | `/azure-connections` | List / create (the caller's own) |
+| GET / POST | `/azure-connections` | List / create, personal or an organization's, as for Git connections |
 | GET / PATCH / DELETE | `/azure-connections/{id}` | Read / update / delete. Delete is refused while a project uses the connection |
 | POST | `/azure-connections/{id}/test` | Runs in the worker, returns `{ok, project_name, error}` |
-| GET / POST | `/projects` | List (`?scope=all\|owned\|shared`, default `all`) / create. Each project carries the caller's `role`, its `owner`, the number of `shares`, `schedule_timezone` (the owner's), the connection summaries and the dashboard fields (`last_run`, `next_run_at`, `comments_posted`) |
+| GET / POST | `/projects` | List (`?scope=all\|owned\|organizations\|shared`, default `all`) / create (personal, or in an organization with `organization_id`, any member). Each project carries the caller's `role`, its `owner` (a user, null for an organization's) and `organization`, the number of `shares`, `schedule_timezone` (the owner's or the organization's), the connection summaries and the dashboard fields (`last_run`, `next_run_at`, `comments_posted`) |
 | GET / PATCH / DELETE | `/projects/{id}` | Read (viewer) / update (editor; connections owner only) / delete (owner) |
 | POST | `/projects/test-pattern` | Body `{pattern, samples[]}`: try a pattern before the project exists |
 | POST | `/projects/{id}/test-pattern` | Body `{pattern?, samples[]}` (default: the saved pattern), returns the IDs found in each sample |
 | POST | `/projects/{id}/sync` | Body `{dry_run?: bool}` (default: the project's `dry_run_default`). Returns `202` with `{run_id}`. Dry run: viewer; real sync: editor |
 | GET | `/projects/{id}/runs` | Paginated run history, newest first |
 | DELETE | `/projects/{id}/runs` | Editor: delete the finished runs, optionally only `?dry_run=true\|false`. Returns `{deleted}` |
+| POST | `/projects/{id}/move` | Owner role: body `{organization_id}` (a personal project into an organization the caller belongs to) or `{to_user_id}` (an organization's project to one of its active members). Returns `{project_id, summary}` |
+| GET / POST | `/organizations` | The caller's organizations (with their role and counts) / create one (anyone; the creator becomes admin) |
+| GET / PATCH / DELETE | `/organizations/{id}` | Read (members) / rename or change the time zone (admins) / delete (admins, only when it owns nothing: 409 `organization_not_empty`) |
+| GET / POST | `/organizations/{id}/members` | List (members) / add `{email, role}` (admins) |
+| PATCH / DELETE | `/organizations/{id}/members/{user_id}` | Change the role (admins) / remove (admins) or leave (oneself). 409 `last_admin` for the last admin |
 | GET / POST | `/projects/{id}/shares` | Owner: list shares / share with `{email, role}` (the exact email of an active user; otherwise 404 `user_not_found`) |
 | PATCH / DELETE | `/projects/{id}/shares/{user_id}` | Owner: change the role / remove the share. A user can also delete their own share (leave) |
 | GET | `/runs/{run_id}` | Run detail with counters and `counts_by_action` |
@@ -274,11 +294,13 @@ The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoin
 | GET | `/admin/users` · PATCH `/admin/users/{id}` | Admin only: list users (with their project count), turn accounts on or off |
 | GET | `/admin/projects` | Admin only: every project with its owner, share count and last run (`?owner_id=` to filter). No settings |
 | POST | `/admin/projects/{id}/transfer` | Admin only: body `{to_user_id}`. Gives the project and its connections to an active user; a connection the previous owner still uses elsewhere is copied |
-| POST | `/admin/users/{id}/transfer` | Admin only: body `{to_user_id}`. Gives everything the user owns (projects and connections) to an active user |
+| POST | `/admin/users/{id}/transfer` | Admin only: body `{to_user_id}`. Gives everything the user owns personally (projects and connections) to an active user; organizations' rows stay |
+| GET | `/admin/organizations` | Admin only: every organization with its members, admins and counts |
+| POST | `/admin/organizations/{id}/admins` | Admin only: body `{user_id}`, a member who becomes an admin of the organization |
 | GET | `/admin/transfers` | Admin only: the transfer history, newest first |
 | GET | `/health` · `/ready` | Liveness / readiness (database, Redis) |
 
-Run actions follow the access rules: cancel and delete need an editor, except a viewer's own dry runs. Transfers keep secrets encrypted as they are, carry the run history and posted comments along, drop a share the new owner had on the project, and add a suffix such as "(from Marco)" to names the new owner already uses.
+Run actions follow the access rules: cancel and delete need an editor, except a viewer's own dry runs. The administrator's project transfer refuses an organization's project (409 `organization_project`): its admins move it. Transfers keep secrets encrypted as they are, carry the run history and posted comments along, drop a share the new owner had on the project, and add a suffix such as "(from Marco)" to names the new owner already uses.
 
 Errors use one shape: `{"error": {"code": "string", "message": "human readable", "details": {}}}`. List endpoints take `?page=&page_size=` (default 25, max 100).
 
@@ -294,9 +316,11 @@ The UI is a responsive single-page app with light and dark themes. Everything a 
 | Settings → Git connections | `/settings/git` | List plus a form: name, repo URL, auth type, username (prefilled for the detected host), token or password, commit URL template, **Test connection** (shows the branches found) |
 | Settings → Azure connections | `/settings/azure` | List plus a form: name, organization URL, project, PAT, **Test connection** |
 | Settings → Projects | `/settings/projects`, `/settings/projects/new`, `/settings/projects/:id` | List of the projects the user can see, then the wizard: pick a Git connection → branches → pick an Azure connection → ticket pattern with **live pattern tester** → comment template with **live preview** → start point → schedule. For an editor the connections are locked; a viewer is told only editors can change the settings |
+| Settings → Organizations | `/settings/organizations`, `/settings/organizations/:id` | The user's organizations and **New organization**. An organization's page: name and time zone (admins), members (add by email, roles, remove, leave), its Git and Azure connections (admins add, edit, delete), its projects and **New project** |
 | Settings → Profile | `/settings/profile` | Display name, time zone, change password |
 | Admin → Users | `/admin/users` | Admins only: list users, turn accounts on or off, **Transfer all** of a user's projects and connections |
-| Admin → Projects | `/admin/projects` | Admins only: every project with its owner, **Transfer** to another user, and the transfer history |
+| Admin → Projects | `/admin/projects` | Admins only: every project with its owner (a user or an organization), **Transfer** of personal projects to another user, and the transfer history |
+| Admin → Organizations | `/admin/organizations` | Admins only: every organization with its admins; **Make admin** for a member |
 
 **UI rules**
 
@@ -313,7 +337,7 @@ TicketTrail stores other systems' credentials, so the security rules below are r
 
 - **Secrets at rest:** Fernet-encrypt every token, PAT and password with `TT_ENCRYPTION_KEY`. Support key rotation with `TT_ENCRYPTION_KEY_OLD` and a `manage.py rotate-keys` command.
 - **Secrets in transit and in logs:** never return secrets from the API or log them. A logging filter scrubs `Authorization` headers, URLs with credentials in them, and known secret fields. Git error output is cleaned before it is stored in `sync_run_items.detail`.
-- **Tenant isolation:** connection queries go through an owner filter; project and run queries go through the one permission check of section 4 (owner, or shared with the caller). Add tests where user B tries to read, change, sync and test user A's resources, and where viewers and editors try what their role doesn't allow.
+- **Tenant isolation:** connection queries go through an owner filter; project and run queries go through the one permission check of section 4 (owner, organization membership, or shared with the caller). Add tests where user B tries to read, change, sync and test user A's resources, and where viewers and editors try what their role doesn't allow.
 - **Passwords:** Argon2id hashing, at least 10 characters, and login rate limits (5 attempts a minute per IP and per email, counted in Redis; if Redis is down, logins are not blocked).
 - **Tokens:** JWT access tokens signed with HS256 using `TT_JWT_SECRET`. Refresh tokens are httpOnly and SameSite=Strict cookies (Secure when `TT_PUBLIC_URL` is https), stored hashed, and rotated each time they are used. Reusing a rotated token signs the user out everywhere, except within a 30-second grace period (two tabs refreshing at once).
 - **Accounts turned off** by an admin are signed out everywhere at once, and their scheduled syncs stop.
@@ -344,8 +368,8 @@ tickettrail/
 │       ├── main.py             # FastAPI app factory
 │       ├── config.py           # pydantic-settings, TT_* env vars
 │       ├── db/                 # models, session, repositories (owner-scoped, access rules, transfers)
-│       ├── api/access.py       # the project / run permission check
-│       ├── api/v1/             # routers: auth, me, git, azure, projects, sharing, runs, admin
+│       ├── api/access.py       # permission checks: projects, runs, organizations, connections
+│       ├── api/v1/             # routers: auth, me, git, azure, projects, sharing, organizations, runs, admin
 │       ├── core/               # security, crypto, logging, errors, cron, rate limits
 │       ├── integrations/
 │       │   ├── git/            # GitClient, host detection, URL builders
@@ -474,8 +498,17 @@ Volumes: `pg_data` (database) and `repos_data` (Git clones). Only `frontend` pub
     - A user the project isn't shared with gets 404 on every project and run endpoint.
     - A transfer keeps secrets encrypted, copies connections the previous owner still uses, and is recorded.
     - The Playwright test covers sharing with a viewer.
-- **S2 – Organizations** *(next; scope confirmed at its gate)*
-  - Any user can create an organization and add members. Organizations can own projects and connections, and a project can be moved into an organization.
+- **S2 – Organizations** *(done)*
+  - *Build:*
+    - `organizations` and `organization_members`; projects and connections owned by a user or an organization; roles derived from membership (admins: owner; members: viewer, raised by shares).
+    - Organization and member endpoints, organization connections, projects created in or moved into and out of an organization, schedules in the organization's time zone.
+    - Admin: organizations' projects in the project list (not transferable), the organization list and **Make admin**.
+    - UI: Settings → Organizations and an organization's page, the Owner choice in the wizard, **Move to an organization** / **Move to a member**, member picker in the Share drawer, one dashboard section per organization, Admin → Organizations.
+  - *Accept when:*
+    - A member sees the organization's projects as viewer and becomes editor through a share; admins own every project; outsiders get 404.
+    - Members use and test the organization's connections without seeing tokens; only admins change them.
+    - Removing a member ends their access; the last admin can't leave; a non-empty organization can't be deleted.
+    - The Playwright test moves a project into an organization and the member finds it there.
 - Out of scope: instance-wide visibility and public links.
 
 ## 13. Testing and definition of done
@@ -502,7 +535,7 @@ A milestone is done only when its acceptance criteria are met, its tests pass in
   - each case asserts exactly one comment per pair
 - **Isolation suite:** for every endpoint, check that a second user gets 404 on the first user's resources.
 - **Access suite:** for each role, check what it may and may not do (section 4), plus the share endpoints and the administrator's transfers.
-- **End to end (Playwright):** register → create both connections → create a project → dry run → real sync (Azure mocked) → see the history → share the project with a viewer, who sees it under **Shared with me**, starts a dry run and can't sync.
+- **End to end (Playwright):** register → create both connections → create a project → dry run → real sync (Azure mocked) → see the history → share the project with a viewer → create an organization with the viewer as a member and move the project into it; the viewer finds it in the organization's section, starts a dry run and can't sync.
 
 **Quality bar**
 
@@ -529,3 +562,4 @@ Decisions taken at the milestone gates, already reflected in the sections above.
 | M6 | Runs can be deleted (one, or all dry runs) | Keeps the history readable; never re-posts a comment |
 | M7 | `TT_DB_PASSWORD` (default `tt`) and a "First start" section in the README | Defaults that work out of the box, changed on first start |
 | M8/S1 | Project sharing (viewer / editor), administrator transfers | Projects survive a colleague leaving; teams can work on the same project |
+| M8/S2 | Organizations: members are viewers by default, raised to editor per project with a share | Least privilege by default; editing rights are given project by project |

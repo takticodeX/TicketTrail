@@ -24,10 +24,9 @@ def ping() -> str:
 
 
 @celery_app.task(name=task_names.TEST_GIT_CONNECTION)
-def check_git_connection(connection_id: str, owner_id: str) -> dict[str, Any]:
-    return run_git_connection_check(
-        get_worker_context(), uuid.UUID(connection_id), uuid.UUID(owner_id)
-    )
+def check_git_connection(connection_id: str, owner_id: str | None = None) -> dict[str, Any]:
+    """owner_id is ignored: kept so messages queued by an older API still run."""
+    return run_git_connection_check(get_worker_context(), uuid.UUID(connection_id))
 
 
 @celery_app.task(name=task_names.SYNC_PROJECT)
@@ -54,10 +53,9 @@ def dispatch_schedules() -> int:
 
 
 @celery_app.task(name=task_names.TEST_AZURE_CONNECTION)
-def check_azure_connection(connection_id: str, owner_id: str) -> dict[str, Any]:
-    return run_azure_connection_check(
-        get_worker_context(), uuid.UUID(connection_id), uuid.UUID(owner_id)
-    )
+def check_azure_connection(connection_id: str, owner_id: str | None = None) -> dict[str, Any]:
+    """owner_id is ignored: kept so messages queued by an older API still run."""
+    return run_azure_connection_check(get_worker_context(), uuid.UUID(connection_id))
 
 
 @worker_ready.connect

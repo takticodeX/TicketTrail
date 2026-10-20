@@ -10,7 +10,8 @@ commit twice to the same work item.
 - **Dry run** shows exactly what would be posted, **Sync now** posts it, and projects can
   sync on a schedule.
 - Credentials are entered in the web UI and stored encrypted.
-- Projects can be shared with colleagues as **viewer** or **editor**.
+- Projects can be shared with colleagues as **viewer** or **editor**, or belong to an
+  **organization** so they stay with the team when someone leaves.
 
 The design is described in [SPEC.md](SPEC.md).
 
@@ -141,6 +142,32 @@ a project shared with them. Syncs always use the owner's connections: their toke
 never shown to anyone, and the schedule runs in the owner's time zone. Manual runs record
 who started them.
 
+### Organizations
+
+Anyone can create an organization (**Settings → Organizations → New organization**) and
+becomes its first admin. Admins add members by their exact email.
+
+- **Admins** manage members and the organization's connections, and have the owner role on
+  every project of the organization.
+- **Members** see every project of the organization and can start dry runs (they are
+  viewers). To let a member sync and change a project, share the project with them as
+  **editor**: the Share drawer lists the members by name.
+- A member who creates a project in the organization becomes its editor.
+- The organization's **connections** are used by every member in its projects; their
+  tokens are never shown, and only admins add, change or delete them.
+- **Schedules** of the organization's projects run in the organization's time zone, and
+  keep running whoever leaves.
+
+To create a project for an organization, pick it as **Owner** in the project wizard (or use
+**New project** on the organization's page). To bring an existing project in, open it and
+click **Move to an organization**: its connections come along (a connection you still use
+in another project is copied), and you stay its editor. An admin can give a project back to
+a member with **Move to a member**.
+
+When someone leaves, an admin removes them from the organization: they lose access to its
+projects at once, shares included. The last admin can't leave; make someone else an admin
+first. An organization can be deleted once it owns no projects and no connections.
+
 ### Administrators
 
 The first account is the administrator. **Admin → Users** turns accounts off (which signs
@@ -158,6 +185,10 @@ Tokens move still encrypted, the run history and posted comments come along, and
 the new owner already uses get a suffix such as "Billing (from Marco)". Every transfer is
 listed under **Transfer history**. To look inside a project, an administrator transfers it
 or asks the owner to share it.
+
+Organizations' projects are not transferred this way: their admins move them. **Admin →
+Organizations** lists every organization with its admins, and **Make admin** promotes a
+member of an organization that has no admin left.
 
 ## 3. Access tokens: minimum scopes per host
 
@@ -291,9 +322,10 @@ To rotate `TT_JWT_SECRET`, change it and restart: everyone has to log in again.
 
 - Tokens, PATs and passwords are encrypted at rest (Fernet) and never returned by the API.
   Passwords are hashed with Argon2id.
-- Every user only sees their own connections, and the projects (with their runs) they own
-  or that are shared with them. Other projects answer 404. Shared users never see or use
-  the owner's connections directly.
+- Every user only sees their own connections and their organizations' connections, and
+  the projects (with their runs) they own, see through an organization, or that are shared
+  with them. Other projects answer 404. Shared users never see or use the owner's
+  connections directly.
 - Credentials are passed to Git through the environment, never in URLs, Git config or
   command lines. Logs are JSON and mask Authorization headers, credentials in URLs and
   secret fields.

@@ -9,7 +9,7 @@ from app.api.deps import CurrentUser, DbSession
 from app.api.v1.schemas import ShareCreate, ShareResponse, ShareUpdate, UserSummary
 from app.core.errors import AppError, not_found
 from app.db.models import ProjectRole, ProjectShare, User
-from app.db.repositories import ProjectShareRepository, UserRepository
+from app.db.repositories import ProjectAccessRepository, ProjectShareRepository, UserRepository
 
 router = APIRouter(prefix="/projects/{project_id}/shares", tags=["sharing"])
 
@@ -40,6 +40,10 @@ def add_share(
         raise AppError(404, "user_not_found", "No user with this email.")
     if target.id == user.id:
         raise AppError(409, "is_owner", "You own this project already.")
+    theirs = ProjectAccessRepository(db, target.id).get(project_id)
+    if theirs is not None and theirs.role is ProjectRole.OWNER:
+        # For example an admin of the organization that owns the project.
+        raise AppError(409, "is_owner", "This user already has owner access to the project.")
     repo = ProjectShareRepository(db, project_id)
     if repo.get(target.id) is not None:
         raise AppError(409, "already_shared", "The project is already shared with this user.")

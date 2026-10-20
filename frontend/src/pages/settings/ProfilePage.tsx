@@ -8,14 +8,8 @@ import { ApiError } from '../../api/client';
 import { applyServerErrors } from '../../api/errors';
 import { updateMe } from '../../api/settings';
 import { useAuth } from '../../hooks/useAuth';
+import { timeZones } from '../../lib/schedule';
 import { passwordSchema, profileSchema, type PasswordValues, type ProfileValues } from '../../schemas/settings';
-
-function timeZones(current: string): string[] {
-  const zones = new Set(Intl.supportedValuesOf('timeZone'));
-  zones.add('UTC');
-  zones.add(current);
-  return [...zones].sort();
-}
 
 function ProfileForm() {
   const { user, updateUser } = useAuth();

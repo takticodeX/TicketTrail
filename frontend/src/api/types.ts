@@ -53,6 +53,8 @@ export type GitHost = 'azure_repos' | 'github' | 'gitlab' | 'bitbucket' | 'gener
 export interface GitConnection {
   id: string;
   name: string;
+  /** Set when an organization owns the connection. */
+  organization_id: string | null;
   repo_url: string;
   auth_type: GitAuthType;
   username: string | null;
@@ -75,6 +77,8 @@ export interface GitConnectionInput {
   /** Write-only. Omit or send "" to keep the saved secret. */
   secret?: string;
   commit_url_template: string | null;
+  /** On create only: the organization that owns it (its admins only). */
+  organization_id?: string;
 }
 
 export interface GitTestResult {
@@ -87,6 +91,8 @@ export interface GitTestResult {
 export interface AzureConnection {
   id: string;
   name: string;
+  /** Set when an organization owns the connection. */
+  organization_id: string | null;
   organization_url: string;
   azure_project: string;
   has_secret: boolean;
@@ -102,6 +108,8 @@ export interface AzureConnectionInput {
   azure_project: string;
   /** Write-only. Omit or send "" to keep the saved PAT. */
   pat?: string;
+  /** On create only: the organization that owns it (its admins only). */
+  organization_id?: string;
 }
 
 export interface AzureTestResult {
@@ -133,7 +141,9 @@ export interface Project {
   // Sharing, computed by the API.
   /** Your role on this project. */
   role: ProjectRole;
+  /** Null when an organization owns the project. */
   owner: UserSummary | null;
+  organization: OrganizationSummary | null;
   /** The owner's time zone: the schedule runs in it. */
   schedule_timezone: string;
   /** Number of users the project is shared with. */
@@ -165,11 +175,42 @@ export type ProjectInput = Omit<
   | 'comments_posted'
   | 'role'
   | 'owner'
+  | 'organization'
   | 'schedule_timezone'
   | 'shares'
   | 'git_connection'
   | 'azure_connection'
->;
+> & {
+  /** On create only: the organization that owns it (any member). */
+  organization_id?: string;
+};
+
+export interface OrganizationSummary {
+  id: string;
+  name: string;
+}
+
+export type OrganizationRole = 'admin' | 'member';
+
+export interface Organization extends OrganizationSummary {
+  timezone: string;
+  /** Your role in the organization. */
+  role: OrganizationRole;
+  members: number;
+  projects: number;
+  created_at: string;
+}
+
+export interface OrganizationMember {
+  user: UserSummary;
+  role: OrganizationRole;
+  created_at: string;
+}
+
+export interface ProjectMoved {
+  project_id: string;
+  summary: string;
+}
 
 export interface ProjectShare {
   user: UserSummary;

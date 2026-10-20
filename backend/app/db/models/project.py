@@ -1,18 +1,18 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint, false, text
+from sqlalchemy import ForeignKey, String, Text, false, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import OwnedModel
+from app.db.base import OwnedModel, ownership_constraints
 
 
 class Project(OwnedModel):
     """One Git connection paired with one Azure DevOps board."""
 
     __tablename__ = "projects"
-    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_projects_owner_name"),)
+    __table_args__ = ownership_constraints("projects")
 
     # RESTRICT: a connection can't be deleted while a project uses it.
     git_connection_id: Mapped[uuid.UUID] = mapped_column(

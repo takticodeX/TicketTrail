@@ -1,10 +1,12 @@
 """Git connections: CRUD and the `git ls-remote` test (run by the worker)."""
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Query, Response, status
 from sqlalchemy.exc import IntegrityError
 
+from app.api.access import connection_for, organization_for
 from app.api.deps import CurrentUser, DbSession, PageDep, SecretBoxDep, TaskRunnerDep
 from app.api.v1.schemas import (
     GitConnectionCreate,
@@ -13,7 +15,7 @@ from app.api.v1.schemas import (
     GitTestResult,
     Page,
 )
-from app.core.errors import AppError, field_error, not_found
+from app.core.errors import AppError, field_error
 from app.db.models import GitAuthType, GitConnection
 from app.db.repositories import GitConnectionRepository, ProjectRepository
 from app.integrations.git.hosts import commit_url_pattern, detect_host
@@ -31,6 +33,7 @@ def to_response(connection: GitConnection) -> GitConnectionResponse:
     return GitConnectionResponse(
         id=connection.id,
         name=connection.name,
+        organization_id=connection.organization_id,
         repo_url=connection.repo_url,
         auth_type=GitAuthType(connection.auth_type),
         username=connection.username,
@@ -45,22 +48,37 @@ def to_response(connection: GitConnection) -> GitConnectionResponse:
     )
 
 
-def _get_or_404(repo: GitConnectionRepository, connection_id: uuid.UUID) -> GitConnection:
-    connection = repo.get(connection_id)
-    if connection is None:
-        raise not_found("Git connection")
-    return connection
+def _scope(
+    db: DbSession, user: CurrentUser, organization_id: uuid.UUID | None, *, admin: bool
+) -> GitConnectionRepository:
+    """The caller's own connections, or an organization's (members read, admins write)."""
+    if organization_id is None:
+        return GitConnectionRepository(db, user.id)
+    organization_for(db, user, organization_id, admin=admin)
+    return GitConnectionRepository(db, organization_id=organization_id)
 
 
-def _name_taken() -> AppError:
-    return AppError(409, "name_taken", "You already have a Git connection with this name.")
+def _get(
+    db: DbSession, user: CurrentUser, connection_id: uuid.UUID, *, write: bool = False
+) -> GitConnection:
+    return connection_for(db, user, GitConnection, connection_id, "Git connection", write=write)
+
+
+def _name_taken(*, organization: bool = False) -> AppError:
+    whose = "The organization already has" if organization else "You already have"
+    return AppError(409, "name_taken", f"{whose} a Git connection with this name.")
 
 
 @router.get("")
 def list_git_connections(
-    user: CurrentUser, db: DbSession, page: PageDep
+    user: CurrentUser,
+    db: DbSession,
+    page: PageDep,
+    organization_id: Annotated[
+        uuid.UUID | None, Query(description="An organization's connections instead of yours")
+    ] = None,
 ) -> Page[GitConnectionResponse]:
-    items, total = GitConnectionRepository(db, user.id).list(
+    items, total = _scope(db, user, organization_id, admin=False).list(
         offset=page.offset, limit=page.page_size
     )
     return Page(
@@ -75,9 +93,10 @@ def list_git_connections(
 def create_git_connection(
     body: GitConnectionCreate, user: CurrentUser, db: DbSession, box: SecretBoxDep
 ) -> GitConnectionResponse:
-    repo = GitConnectionRepository(db, user.id)
+    """Personal, or the organization's when organization_id is set (admins only)."""
+    repo = _scope(db, user, body.organization_id, admin=True)
     if repo.name_taken(body.name):
-        raise _name_taken()
+        raise _name_taken(organization=body.organization_id is not None)
     connection = repo.add(
         GitConnection(
             name=body.name,
@@ -96,7 +115,7 @@ def create_git_connection(
 def get_git_connection(
     connection_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> GitConnectionResponse:
-    return to_response(_get_or_404(GitConnectionRepository(db, user.id), connection_id))
+    return to_response(_get(db, user, connection_id))
 
 
 @router.patch("/{connection_id}")
@@ -107,14 +126,14 @@ def update_git_connection(
     db: DbSession,
     box: SecretBoxDep,
 ) -> GitConnectionResponse:
-    repo = GitConnectionRepository(db, user.id)
-    connection = _get_or_404(repo, connection_id)
+    connection = _get(db, user, connection_id, write=True)
+    repo = GitConnectionRepository.owning(db, connection)
     sent = body.model_fields_set
     before = (connection.repo_url, connection.auth_type, connection.username, connection.secret_enc)
 
     if body.name is not None:
         if repo.name_taken(body.name, exclude_id=connection.id):
-            raise _name_taken()
+            raise _name_taken(organization=connection.organization_id is not None)
         connection.name = body.name
     if body.repo_url is not None:
         connection.repo_url = body.repo_url
@@ -148,8 +167,8 @@ def update_git_connection(
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_git_connection(connection_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Response:
     """Refused (409) while a project uses the connection."""
-    connection = _get_or_404(GitConnectionRepository(db, user.id), connection_id)
-    in_use = ProjectRepository(db, user.id).names_using(git_connection_id=connection.id)
+    connection = _get(db, user, connection_id, write=True)
+    in_use = ProjectRepository.owning(db, connection).names_using(git_connection_id=connection.id)
     if in_use:
         raise connection_in_use(in_use)
     try:
@@ -175,12 +194,12 @@ def test_git_connection(
     connection_id: uuid.UUID, user: CurrentUser, db: DbSession, runner: TaskRunnerDep
 ) -> GitTestResult:
     """Runs `git ls-remote` on the worker and lists the branches it finds."""
-    connection = _get_or_404(GitConnectionRepository(db, user.id), connection_id)
+    connection = _get(db, user, connection_id)
     db.close()  # don't hold a database connection while the worker runs
     try:
         result = runner.run(
             task_names.TEST_GIT_CONNECTION,
-            [str(connection.id), str(user.id)],
+            [str(connection.id)],
             timeout=TEST_WAIT_SECONDS,
         )
     except WorkerUnavailableError as exc:

@@ -64,6 +64,11 @@ export function ProjectsPage() {
               {project.name}
             </Anchor>
             <RoleBadge project={project} ml="xs" />
+            {project.organization && (
+              <Text size="xs" c="dimmed">
+                {project.organization.name}
+              </Text>
+            )}
             {project.dry_run_default && (
               <Badge ml="xs" size="xs" variant="light" color="yellow">
                 Dry run

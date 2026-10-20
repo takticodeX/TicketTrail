@@ -99,8 +99,16 @@ export function DashboardPage() {
   const projects = useProjects();
   const timeZone = user?.timezone ?? 'UTC';
   const all = projects.data?.items ?? [];
-  const own = all.filter((p) => p.role === 'owner');
-  const shared = all.filter((p) => p.role !== 'owner');
+  const own = all.filter((p) => !p.organization && p.role === 'owner');
+  const shared = all.filter((p) => !p.organization && p.role !== 'owner');
+  // One section per organization, in name order.
+  const byOrganization = new Map<string, Project[]>();
+  for (const project of all) {
+    if (!project.organization) continue;
+    byOrganization.set(project.organization.name, [...(byOrganization.get(project.organization.name) ?? []), project]);
+  }
+  const organizations = [...byOrganization.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const others = shared.length + organizations.length;
 
   return (
     <Stack maw={1100}>
@@ -118,7 +126,7 @@ export function DashboardPage() {
       {projects.data && own.length === 0 && (
         <Card withBorder p="xl" radius="md">
           <Stack gap="xs" align="center" ta="center">
-            <Text fw={600}>{shared.length > 0 ? 'No projects of your own yet' : 'No projects yet'}</Text>
+            <Text fw={600}>{others > 0 ? 'No projects of your own yet' : 'No projects yet'}</Text>
             <Text c="dimmed" size="sm" maw={460}>
               {user ? `Welcome, ${user.display_name}. ` : ''}A project links a Git repository to an
               Azure DevOps board.
@@ -130,6 +138,14 @@ export function DashboardPage() {
         </Card>
       )}
       {own.length > 0 && <ProjectGrid projects={own} timeZone={timeZone} />}
+      {organizations.map(([name, items]) => (
+        <div key={name}>
+          <Title order={4} mt="md" mb="sm">
+            {name}
+          </Title>
+          <ProjectGrid projects={items} timeZone={timeZone} />
+        </div>
+      ))}
       {shared.length > 0 && (
         <>
           <Title order={4} mt="md">

@@ -20,7 +20,7 @@ import {
 import { notifications } from '@mantine/notifications';
 import { useMemo, useState } from 'react';
 import { Controller, useForm, type FieldPath } from 'react-hook-form';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { applyServerErrors, errorMessage } from '../../api/errors';
 import type { GitTestResult, Project } from '../../api/types';
@@ -29,6 +29,7 @@ import { DEFAULT_SAMPLES, PatternTester } from '../../components/settings/Patter
 import { ScheduleField } from '../../components/settings/ScheduleField';
 import { TemplateEditor } from '../../components/settings/TemplateEditor';
 import { useAuth } from '../../hooks/useAuth';
+import { useOrganizations } from '../../hooks/useOrganizations';
 import {
   useAzureConnections,
   useGitConnections,
@@ -91,11 +92,21 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
   const editing = project !== undefined;
   // An editor changes everything but the connections, which belong to the owner.
   const ownsConnections = !editing || project.role === 'owner';
-  const ownerName = project?.owner?.display_name ?? 'the owner';
+  const ownerName = project?.organization
+    ? `an admin of ${project.organization.name}`
+    : (project?.owner?.display_name ?? 'the owner');
+  // Members may use (and test) their organization's connections, not change them.
+  const canLoadBranches = ownsConnections || Boolean(project?.organization);
   const navigate = useNavigate();
   const { user } = useAuth();
-  const gitConnections = useGitConnections();
-  const azureConnections = useAzureConnections();
+  const [searchParams] = useSearchParams();
+  const organizations = useOrganizations();
+  // Who owns the project: the user (null) or an organization. Fixed once created.
+  const [organizationId, setOrganizationId] = useState<string | null>(
+    project ? (project.organization?.id ?? null) : searchParams.get('organization'),
+  );
+  const gitConnections = useGitConnections(organizationId);
+  const azureConnections = useAzureConnections(organizationId);
   const save = useSaveProject();
   const loadBranches = useTestGitConnection();
 
@@ -111,6 +122,7 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
     watch,
     trigger,
     setError,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<ProjectValues>({
     resolver: zodResolver(projectSchema),
@@ -136,7 +148,9 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
     async (values) => {
       setFormError(null);
       try {
-        const saved = await save.mutateAsync({ id: project?.id, body: toProjectInput(values) });
+        const body = toProjectInput(values);
+        if (!editing && organizationId) body.organization_id = organizationId;
+        const saved = await save.mutateAsync({ id: project?.id, body });
         notifications.show({ color: 'teal', message: `Saved "${saved.name}".` });
         navigate('/settings/projects');
       } catch (error) {
@@ -166,6 +180,18 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
   const gitOptions = gitChoices.flatMap((c) => (c ? [{ value: c.id, label: c.name }] : []));
   const azureOptions = azureChoices.flatMap((c) => (c ? [{ value: c.id, label: `${c.name} (${c.azure_project})` }] : []));
   const lockedHint = ownsConnections ? undefined : `Only ${ownerName} can change the connection.`;
+  const ownerOptions = [
+    { value: '', label: 'Me (a personal project)' },
+    ...(organizations.data ?? []).map((org) => ({ value: org.id, label: org.name })),
+  ];
+  const connectionsPage = organizationId ? `/settings/organizations/${organizationId}` : null;
+  const onOwnerChange = (value: string | null) => {
+    setOrganizationId(value || null);
+    // The other owner's connections can't be used.
+    setValue('git_connection_id', '');
+    setValue('azure_connection_id', '');
+    setBranchResult(null);
+  };
   const isLast = active === STEPS.length - 1;
 
   return (
@@ -194,6 +220,16 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
               <Stepper.Step label="Repository">
                 <Stack pt="md">
                   <TextInput label="Project name" error={errors.name?.message} {...register('name')} />
+                  {!editing && (organizations.data?.length ?? 0) > 0 && (
+                    <Select
+                      label="Owner"
+                      description="An organization's project stays with the organization when people leave."
+                      data={ownerOptions}
+                      value={organizationId ?? ''}
+                      allowDeselect={false}
+                      onChange={onOwnerChange}
+                    />
+                  )}
                   <Controller
                     control={control}
                     name="git_connection_id"
@@ -217,7 +253,7 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
                   {ownsConnections && gitConnections.data?.items.length === 0 && (
                     <Text size="sm">
                       No Git connections yet.{' '}
-                      <Anchor component={Link} to="/settings/git">
+                      <Anchor component={Link} to={connectionsPage ?? '/settings/git'}>
                         Add one first
                       </Anchor>
                       .
@@ -233,12 +269,12 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
                       variant="default"
                       onClick={() => void onLoadBranches()}
                       loading={loadBranches.isPending}
-                      disabled={!gitId || !ownsConnections}
+                      disabled={!gitId || !canLoadBranches}
                     >
                       Load branches from the repository
                     </Button>
                   </Group>
-                  {!ownsConnections && (
+                  {!canLoadBranches && (
                     <Text size="xs" c="dimmed">
                       Loading branches uses {ownerName}'s Git connection, so only they can do it. Type the branch
                       names instead.
@@ -288,7 +324,7 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
                   {ownsConnections && azureConnections.data?.items.length === 0 && (
                     <Text size="sm">
                       No Azure connections yet.{' '}
-                      <Anchor component={Link} to="/settings/azure">
+                      <Anchor component={Link} to={connectionsPage ?? '/settings/azure'}>
                         Add one first
                       </Anchor>
                       .

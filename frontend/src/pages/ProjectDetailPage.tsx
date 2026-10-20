@@ -21,12 +21,14 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { errorMessage } from '../api/errors';
 import type { SyncRun } from '../api/types';
 import { confirmDelete } from '../components/confirmDelete';
+import { MoveProjectModal } from '../components/MoveProjectModal';
 import { RoleBadge, SharingLine } from '../components/ProjectAccess';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { ShareDrawer } from '../components/ShareDrawer';
 import { SyncNowButton } from '../components/SyncNowButton';
 import { useAuth } from '../hooks/useAuth';
 import { useDryRun } from '../hooks/useDryRun';
+import { useOrganizations } from '../hooks/useOrganizations';
 import { useClearDryRuns, useDeleteRun, useRuns } from '../hooks/useRuns';
 import { useProject } from '../hooks/useSettings';
 import { useRemoveShare } from '../hooks/useSharing';
@@ -44,6 +46,8 @@ export function ProjectDetailPage() {
   const project = useProject(projectId);
   const [page, setPage] = useState(1);
   const [sharing, setSharing] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const organizations = useOrganizations();
   const runs = useRuns(projectId, page);
   const dryRun = useDryRun(projectId);
   const deleteRun = useDeleteRun(projectId);
@@ -68,6 +72,8 @@ export function ProjectDetailPage() {
   const gitConnection = project.data.git_connection;
   const azureConnection = project.data.azure_connection;
   const editable = canEdit(project.data);
+  // Into an organization needs one to belong to; out of one is always possible for its admins.
+  const canMove = Boolean(project.data.organization) || (organizations.data?.length ?? 0) > 0;
 
   const onDeleteRun = (run: SyncRun) =>
     confirmDelete({
@@ -136,14 +142,22 @@ export function ProjectDetailPage() {
           <SharingLine project={project.data} />
         </div>
         <Group gap="sm">
+          {isOwner(project.data) && canMove && (
+            <Button variant="subtle" onClick={() => setMoving(true)}>
+              {project.data.organization ? 'Move to a member' : 'Move to an organization'}
+            </Button>
+          )}
           {isOwner(project.data) ? (
             <Button variant="default" onClick={() => setSharing(true)}>
               Share
             </Button>
           ) : (
-            <Button variant="subtle" color="red" onClick={onLeave}>
-              Leave
-            </Button>
+            // An organization's members leave the organization instead.
+            !project.data.organization && (
+              <Button variant="subtle" color="red" onClick={onLeave}>
+                Leave
+              </Button>
+            )
           )}
           {editable && (
             <Button variant="default" component={Link} to={`/settings/projects/${projectId}`}>
@@ -157,7 +171,10 @@ export function ProjectDetailPage() {
         </Group>
       </Group>
       {isOwner(project.data) && (
-        <ShareDrawer project={project.data} opened={sharing} onClose={() => setSharing(false)} />
+        <>
+          <ShareDrawer project={project.data} opened={sharing} onClose={() => setSharing(false)} />
+          <MoveProjectModal project={project.data} opened={moving} onClose={() => setMoving(false)} />
+        </>
       )}
       <Text size="sm" c="dimmed">
         A dry run lists which comments would be posted, without changing anything in Azure DevOps.

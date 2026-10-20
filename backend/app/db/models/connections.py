@@ -1,10 +1,10 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import OwnedModel
+from app.db.base import OwnedModel, ownership_constraints
 
 
 class GitAuthType(StrEnum):
@@ -16,7 +16,7 @@ class GitAuthType(StrEnum):
 class GitConnection(OwnedModel):
     __tablename__ = "git_connections"
     __table_args__ = (
-        UniqueConstraint("owner_id", "name", name="uq_git_connections_owner_name"),
+        *ownership_constraints("git_connections"),
         CheckConstraint("auth_type IN ('token', 'basic', 'none')", name="auth_type_valid"),
     )
 
@@ -32,7 +32,7 @@ class GitConnection(OwnedModel):
 
 class AzureConnection(OwnedModel):
     __tablename__ = "azure_connections"
-    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_azure_connections_owner_name"),)
+    __table_args__ = ownership_constraints("azure_connections")
 
     organization_url: Mapped[str] = mapped_column(String(2048))
     azure_project: Mapped[str] = mapped_column(String(255))

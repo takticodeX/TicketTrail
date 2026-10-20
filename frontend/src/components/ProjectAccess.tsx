@@ -17,7 +17,16 @@ export function RoleBadge({ project, ...props }: { project: Pick<Project, 'role'
 export function SharingLine({
   project,
   ...props
-}: { project: Pick<Project, 'role' | 'owner' | 'shares'> } & TextProps) {
+}: { project: Pick<Project, 'role' | 'owner' | 'organization' | 'shares'> } & TextProps) {
+  if (project.organization) {
+    const shared = project.shares > 0 ? ` · shared with ${project.shares}` : '';
+    return (
+      <Text size="sm" c="dimmed" {...props}>
+        {project.organization.name}
+        {project.role === 'owner' ? shared : ''}
+      </Text>
+    );
+  }
   if (project.role !== 'owner') {
     return (
       <Text size="sm" c="dimmed" {...props}>

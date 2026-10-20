@@ -1,12 +1,14 @@
-"""Moving projects and connections from one user to another (an administrator's tool).
+"""Moving projects and connections to another owner: a user or an organization.
 
-Secrets move as they are, still encrypted: nobody sees them on the way. A connection
-the previous owner still uses in another project is copied instead of moved, so
-their remaining projects keep working.
+Used by the administrator's transfers and by moving a project into or out of an
+organization. Secrets move as they are, still encrypted: nobody sees them on the way.
+A connection the previous owner still uses in another project is copied instead of
+moved, so their remaining projects keep working.
 """
 
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -15,6 +17,7 @@ from app.db.base import OwnedModel
 from app.db.models import (
     AzureConnection,
     GitConnection,
+    Organization,
     OwnershipTransfer,
     Project,
     ProjectShare,
@@ -33,55 +36,83 @@ _GIT_COPIED = (
 _AZURE_COPIED = ("organization_url", "azure_project", "pat_enc")
 
 
+@dataclass(frozen=True)
+class Owner:
+    """Who owns a row: exactly one of a user and an organization."""
+
+    user_id: uuid.UUID | None
+    organization_id: uuid.UUID | None
+    # Used in "Billing (from Marco)" when the new owner already has that name.
+    label: str
+    # Used in the summary of a move.
+    describe: str
+
+    @classmethod
+    def of_user(cls, user: User) -> "Owner":
+        return cls(user.id, None, user.display_name, user.email)
+
+    @classmethod
+    def of_organization(cls, organization: Organization) -> "Owner":
+        return cls(None, organization.id, organization.name, f'organization "{organization.name}"')
+
+    def owns(self, model: type[OwnedModel]) -> Any:
+        if self.organization_id is not None:
+            return model.organization_id == self.organization_id
+        return model.owner_id == self.user_id
+
+    def assign(self, item: OwnedModel) -> None:
+        item.owner_id = self.user_id
+        item.organization_id = self.organization_id
+
+
 @dataclass
-class _Tally:
+class Tally:
     projects: int = 0
     moved: int = 0
     copied: int = 0
     notes: list[str] = field(default_factory=list)
 
 
-def _name_taken(session: Session, model: type[OwnedModel], owner_id: uuid.UUID, name: str) -> bool:
+def _name_taken(session: Session, model: type[OwnedModel], owner: Owner, name: str) -> bool:
     return bool(
         session.scalar(
-            select(func.count())
-            .select_from(model)
-            .where(model.owner_id == owner_id, model.name == name)
+            select(func.count()).select_from(model).where(owner.owns(model), model.name == name)
         )
     )
 
 
 def _free_name(
-    session: Session, model: type[OwnedModel], owner_id: uuid.UUID, name: str, previous: User
+    session: Session, model: type[OwnedModel], owner: Owner, name: str, previous: Owner
 ) -> str:
     """The name itself, or "name (from Previous)" when the new owner already uses it."""
-    if not _name_taken(session, model, owner_id, name):
+    if not _name_taken(session, model, owner, name):
         return name
     for attempt in range(1, 1000):
-        suffix = f" (from {previous.display_name})" + (f" {attempt}" if attempt > 1 else "")
+        suffix = f" (from {previous.label})" + (f" {attempt}" if attempt > 1 else "")
         candidate = name[: NAME_MAX - len(suffix)] + suffix
-        if not _name_taken(session, model, owner_id, candidate):
+        if not _name_taken(session, model, owner, candidate):
             return candidate
     return f"{name[: NAME_MAX - 37]} {uuid.uuid4()}"  # pragma: no cover
 
 
 def _hand_over(
-    session: Session, item: OwnedModel, previous: User, to: User, tally: _Tally, kind: str
+    session: Session, item: OwnedModel, previous: Owner, to: Owner, tally: Tally, kind: str
 ) -> None:
-    name = _free_name(session, type(item), to.id, item.name, previous)
+    name = _free_name(session, type(item), to, item.name, previous)
     if name != item.name:
         tally.notes.append(f'{kind} "{item.name}" renamed to "{name}"')
-    item.owner_id = to.id
+    to.assign(item)
     item.name = name
     session.flush()
 
 
 def _copy[C: (GitConnection, AzureConnection)](
-    session: Session, original: C, copied: tuple[str, ...], previous: User, to: User
+    session: Session, original: C, copied: tuple[str, ...], previous: Owner, to: Owner
 ) -> C:
     copy = type(original)(
-        owner_id=to.id,
-        name=_free_name(session, type(original), to.id, original.name, previous),
+        owner_id=to.user_id,
+        organization_id=to.organization_id,
+        name=_free_name(session, type(original), to, original.name, previous),
         **{column: getattr(original, column) for column in copied},
     )
     session.add(copy)
@@ -89,25 +120,55 @@ def _copy[C: (GitConnection, AzureConnection)](
     return copy
 
 
-def _still_used(
-    session: Session, column: object, connection_id: uuid.UUID, owner_id: uuid.UUID
-) -> bool:
+def _still_used(session: Session, column: Any, connection_id: uuid.UUID, owner: Owner) -> bool:
     return bool(
         session.scalar(
             select(func.count())
             .select_from(Project)
-            .where(column == connection_id, Project.owner_id == owner_id)  # type: ignore[arg-type]
+            .where(column == connection_id, owner.owns(Project))
         )
     )
 
 
-def _drop_own_shares(session: Session, project_ids: list[uuid.UUID], user_id: uuid.UUID) -> None:
+def drop_shares(session: Session, project_ids: list[uuid.UUID], user_id: uuid.UUID) -> None:
     """A user doesn't need a share on a project they now own."""
     session.execute(
         delete(ProjectShare).where(
             ProjectShare.project_id.in_(project_ids), ProjectShare.user_id == user_id
         )
     )
+
+
+def move_project(session: Session, project: Project, previous: Owner, to: Owner) -> Tally:
+    """Give one project, and the connections it uses, to another owner."""
+    tally = Tally(projects=1)
+    _hand_over(session, project, previous, to, tally, "Project")
+    if to.user_id is not None:
+        drop_shares(session, [project.id], to.user_id)
+
+    git = session.get(GitConnection, project.git_connection_id)
+    azure = session.get(AzureConnection, project.azure_connection_id)
+    assert git is not None and azure is not None  # noqa: S101  (RESTRICT foreign keys)
+    if _still_used(session, Project.git_connection_id, git.id, previous):
+        project.git_connection_id = _copy(session, git, _GIT_COPIED, previous, to).id
+        tally.copied += 1
+        tally.notes.append(
+            f'Git connection "{git.name}" copied (still used by {previous.describe})'
+        )
+    else:
+        _hand_over(session, git, previous, to, tally, "Git connection")
+        tally.moved += 1
+    if _still_used(session, Project.azure_connection_id, azure.id, previous):
+        project.azure_connection_id = _copy(session, azure, _AZURE_COPIED, previous, to).id
+        tally.copied += 1
+        tally.notes.append(
+            f'Azure connection "{azure.name}" copied (still used by {previous.describe})'
+        )
+    else:
+        _hand_over(session, azure, previous, to, tally, "Azure connection")
+        tally.moved += 1
+    session.flush()
+    return tally
 
 
 def _record(
@@ -117,7 +178,7 @@ def _record(
     previous: User,
     to: User,
     project: Project | None,
-    tally: _Tally,
+    tally: Tally,
     headline: str,
 ) -> OwnershipTransfer:
     transfer = OwnershipTransfer(
@@ -138,32 +199,9 @@ def _record(
 def transfer_project(
     session: Session, *, admin: User, project: Project, previous: User, to: User
 ) -> OwnershipTransfer:
-    """Give one project, and the connections it uses, to another user."""
-    tally = _Tally(projects=1)
+    """The administrator gives one personal project, with its connections, to another user."""
     headline = f'Project "{project.name}" from {previous.email} to {to.email}'
-    _hand_over(session, project, previous, to, tally, "Project")
-    _drop_own_shares(session, [project.id], to.id)
-
-    git = session.get(GitConnection, project.git_connection_id)
-    azure = session.get(AzureConnection, project.azure_connection_id)
-    assert git is not None and azure is not None  # noqa: S101  (RESTRICT foreign keys)
-    if _still_used(session, Project.git_connection_id, git.id, previous.id):
-        project.git_connection_id = _copy(session, git, _GIT_COPIED, previous, to).id
-        tally.copied += 1
-        tally.notes.append(f'Git connection "{git.name}" copied (still used by {previous.email})')
-    else:
-        _hand_over(session, git, previous, to, tally, "Git connection")
-        tally.moved += 1
-    if _still_used(session, Project.azure_connection_id, azure.id, previous.id):
-        project.azure_connection_id = _copy(session, azure, _AZURE_COPIED, previous, to).id
-        tally.copied += 1
-        tally.notes.append(
-            f'Azure connection "{azure.name}" copied (still used by {previous.email})'
-        )
-    else:
-        _hand_over(session, azure, previous, to, tally, "Azure connection")
-        tally.moved += 1
-    session.flush()
+    tally = move_project(session, project, Owner.of_user(previous), Owner.of_user(to))
     return _record(
         session,
         admin=admin,
@@ -178,19 +216,23 @@ def transfer_project(
 def transfer_everything(
     session: Session, *, admin: User, previous: User, to: User
 ) -> OwnershipTransfer:
-    """Give every project and connection a user owns to another user."""
-    tally = _Tally()
+    """Give every project and connection a user owns personally to another user.
+
+    What belongs to the user's organizations stays there.
+    """
+    tally = Tally()
     headline = f"Everything owned by {previous.email} to {to.email}"
+    source, target = Owner.of_user(previous), Owner.of_user(to)
     projects = session.scalars(select(Project).where(Project.owner_id == previous.id)).all()
     for project in projects:
-        _hand_over(session, project, previous, to, tally, "Project")
+        _hand_over(session, project, source, target, tally, "Project")
         tally.projects += 1
     for model in (GitConnection, AzureConnection):
         kind = "Git connection" if model is GitConnection else "Azure connection"
         for connection in session.scalars(select(model).where(model.owner_id == previous.id)).all():
-            _hand_over(session, connection, previous, to, tally, kind)
+            _hand_over(session, connection, source, target, tally, kind)
             tally.moved += 1
-    _drop_own_shares(session, [p.id for p in projects], to.id)
+    drop_shares(session, [p.id for p in projects], to.id)
     return _record(
         session,
         admin=admin,

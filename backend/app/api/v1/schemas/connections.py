@@ -53,6 +53,9 @@ class GitConnectionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: Name
+    organization_id: uuid.UUID | None = Field(
+        default=None, description="Create it for this organization (its admins only)"
+    )
     repo_url: HttpsUrl
     auth_type: GitAuthType
     username: Username = None
@@ -90,6 +93,9 @@ class GitConnectionUpdate(BaseModel):
 class GitConnectionResponse(BaseModel):
     id: uuid.UUID
     name: str
+    organization_id: uuid.UUID | None = Field(
+        default=None, description="Set when an organization owns the connection"
+    )
     repo_url: str
     auth_type: GitAuthType
     username: str | None
@@ -119,6 +125,9 @@ class AzureConnectionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: Name
+    organization_id: uuid.UUID | None = Field(
+        default=None, description="Create it for this organization (its admins only)"
+    )
     organization_url: Annotated[HttpsUrl, AfterValidator(lambda url: url.rstrip("/"))] = Field(
         description="For example https://dev.azure.com/acme"
     )
@@ -140,6 +149,9 @@ class AzureConnectionUpdate(BaseModel):
 class AzureConnectionResponse(BaseModel):
     id: uuid.UUID
     name: str
+    organization_id: uuid.UUID | None = Field(
+        default=None, description="Set when an organization owns the connection"
+    )
     organization_url: str
     azure_project: str
     has_secret: bool

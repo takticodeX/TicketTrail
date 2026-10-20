@@ -26,6 +26,7 @@ const billing: AdminProject = {
   id: 'p1',
   name: 'Billing',
   owner: { id: 'u2', display_name: 'Marco', email: 'marco@example.com', is_active: false },
+  organization: null,
   shares: 2,
   created_at: '',
   last_run: null,

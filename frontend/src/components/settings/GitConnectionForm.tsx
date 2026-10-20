@@ -39,9 +39,11 @@ interface Props {
   /** Called after a save; a new connection keeps the form open in edit mode. */
   onSaved: (connection: GitConnection) => void;
   onClose: () => void;
+  /** A new connection is created for this organization instead of for the user. */
+  organizationId?: string;
 }
 
-export function GitConnectionForm({ connection, onSaved, onClose }: Props) {
+export function GitConnectionForm({ connection, onSaved, onClose, organizationId }: Props) {
   const save = useSaveGitConnection();
   const test = useTestGitConnection();
   const [formError, setFormError] = useState<string | null>(null);
@@ -94,7 +96,8 @@ export function GitConnectionForm({ connection, onSaved, onClose }: Props) {
       setTestResult(null);
       let saved: GitConnection;
       try {
-        saved = await save.mutateAsync({ id: connection?.id, body: toInput(values) });
+        const body = connection ? toInput(values) : { ...toInput(values), organization_id: organizationId };
+        saved = await save.mutateAsync({ id: connection?.id, body });
       } catch (error) {
         setFormError(applyServerErrors(error, setError, FIELDS));
         return;

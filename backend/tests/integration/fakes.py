@@ -8,7 +8,7 @@ from app.worker.connection_checks import run_azure_connection_check, run_git_con
 from app.worker.context import WorkerContext
 from app.worker.runner import WorkerUnavailableError
 
-_TASKS: dict[str, Callable[[WorkerContext, uuid.UUID, uuid.UUID], dict[str, Any]]] = {
+_TASKS: dict[str, Callable[[WorkerContext, uuid.UUID], dict[str, Any]]] = {
     task_names.TEST_GIT_CONNECTION: run_git_connection_check,
     task_names.TEST_AZURE_CONNECTION: run_azure_connection_check,
 }
@@ -28,8 +28,8 @@ class InProcessTaskRunner:
         self.calls.append((name, args))
         if self.unavailable:
             raise WorkerUnavailableError("no worker answered in time")
-        connection_id, owner_id = (uuid.UUID(arg) for arg in args)
-        return _TASKS[name](self.context, connection_id, owner_id)
+        (connection_id,) = args
+        return _TASKS[name](self.context, uuid.UUID(connection_id))
 
     def enqueue(self, name: str, args: list[Any]) -> None:
         self.calls.append((name, args))

@@ -9,6 +9,7 @@ from app.api.v1 import (
     git_connections,
     health,
     me,
+    organizations,
     projects,
     runs,
     sharing,
@@ -46,6 +47,13 @@ _CONNECTION_ERRORS = {
 api_router.include_router(git_connections.router, responses=_CONNECTION_ERRORS)
 api_router.include_router(azure_connections.router, responses=_CONNECTION_ERRORS)
 api_router.include_router(projects.router, responses=_RESOURCE_ERRORS)
+api_router.include_router(
+    organizations.router,
+    responses={
+        **_RESOURCE_ERRORS,
+        403: {"model": ErrorResponse, "description": "Only an admin of the organization"},
+    },
+)
 api_router.include_router(
     sharing.router,
     responses={

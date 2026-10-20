@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { AppLayout } from './components/AppLayout';
 import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './components/RequireAuth';
+import { AdminOrganizationsPage } from './pages/admin/AdminOrganizationsPage';
 import { AdminProjectsPage } from './pages/admin/AdminProjectsPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -12,6 +13,8 @@ import { RegisterPage } from './pages/RegisterPage';
 import { RunDetailPage } from './pages/RunDetailPage';
 import { AzureConnectionsPage } from './pages/settings/AzureConnectionsPage';
 import { GitConnectionsPage } from './pages/settings/GitConnectionsPage';
+import { OrganizationPage } from './pages/settings/OrganizationPage';
+import { OrganizationsPage } from './pages/settings/OrganizationsPage';
 import { ProfilePage } from './pages/settings/ProfilePage';
 import { ProjectsPage } from './pages/settings/ProjectsPage';
 import { ProjectWizardPage } from './pages/settings/ProjectWizardPage';
@@ -56,6 +59,8 @@ export function AppRoutes() {
           <Route path="projects/:projectId" element={<ProjectWizardPage />} />
           <Route path="git" element={<GitConnectionsPage />} />
           <Route path="azure" element={<AzureConnectionsPage />} />
+          <Route path="organizations" element={<OrganizationsPage />} />
+          <Route path="organizations/:organizationId" element={<OrganizationPage />} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>
         <Route
@@ -71,6 +76,14 @@ export function AppRoutes() {
           element={
             <RequireAdmin fallback={<NotFoundPage />}>
               <AdminProjectsPage />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="admin/organizations"
+          element={
+            <RequireAdmin fallback={<NotFoundPage />}>
+              <AdminOrganizationsPage />
             </RequireAdmin>
           }
         />

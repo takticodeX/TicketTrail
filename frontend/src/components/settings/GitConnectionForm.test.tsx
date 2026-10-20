@@ -10,6 +10,7 @@ import { GitConnectionForm } from './GitConnectionForm';
 const saved: GitConnection = {
   id: 'g1',
   name: 'App repo',
+  organization_id: null,
   repo_url: 'https://github.com/acme/app.git',
   auth_type: 'token',
   username: 'x-access-token',

@@ -5,6 +5,7 @@ import { useState, type FormEvent } from 'react';
 
 import { errorMessage, firstFieldMessage } from '../api/errors';
 import type { Project, ProjectShare, ShareRole } from '../api/types';
+import { useMembers } from '../hooks/useOrganizations';
 import { useAddShare, useRemoveShare, useShares, useUpdateShare } from '../hooks/useSharing';
 import { ROLE_DESCRIPTIONS, ROLE_LABELS } from '../lib/access';
 
@@ -16,6 +17,11 @@ export function ShareDrawer({ project, opened, onClose }: { project: Project; op
   const add = useAddShare(project.id);
   const update = useUpdateShare(project.id);
   const remove = useRemoveShare(project.id);
+  // An organization's members see each other: offer them by name.
+  const members = useMembers(opened && project.organization ? project.organization.id : undefined);
+  const memberOptions = (members.data ?? [])
+    .filter((m) => m.role === 'member')
+    .map((m) => ({ value: m.user.email, label: `${m.user.display_name} (${m.user.email})` }));
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<ShareRole>('viewer');
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +77,21 @@ export function ShareDrawer({ project, opened, onClose }: { project: Project; op
       <Stack>
         <form onSubmit={onAdd} noValidate>
           <Stack gap="sm">
+            {memberOptions.length > 0 && (
+              <Select
+                label={`Member of ${project.organization?.name ?? 'the organization'}`}
+                description="Members are viewers of every project; make one an editor of this one."
+                placeholder="Pick a member"
+                data={memberOptions}
+                value={memberOptions.some((o) => o.value === email) ? email : null}
+                onChange={(value) => {
+                  setEmail(value ?? '');
+                  if (value) setRole('editor');
+                }}
+                searchable
+                clearable
+              />
+            )}
             <Group align="flex-start" gap="sm" wrap="nowrap">
               <TextInput
                 label="Email"

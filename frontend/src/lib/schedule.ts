@@ -80,3 +80,11 @@ export function formatRunTime(date: Date, timeZone: string, locale?: string): st
     timeZone,
   }).format(date);
 }
+
+/** Every IANA time zone the browser knows, plus UTC and the current value. */
+export function timeZones(current: string): string[] {
+  const zones = new Set(Intl.supportedValuesOf('timeZone'));
+  zones.add('UTC');
+  zones.add(current);
+  return [...zones].sort();
+}

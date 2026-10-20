@@ -7,7 +7,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
-from app.api.v1.schemas.common import Name, UserSummary
+from app.api.v1.schemas.common import Name, OrganizationSummary, UserSummary
 from app.api.v1.schemas.runs import RunResponse
 from app.core.cron import InvalidCronError, validate_cron
 from app.integrations.git.hosts import GitHost
@@ -93,6 +93,10 @@ class ProjectCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: Name
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        description="Create it in this organization (any member), with its connections",
+    )
     git_connection_id: uuid.UUID
     azure_connection_id: uuid.UUID
     branches: Branches = Field(
@@ -178,13 +182,34 @@ class ProjectResponse(BaseModel):
     comments_posted: int = Field(default=0, description="Comments posted for this project so far")
     # Sharing.
     role: ProjectRoleName = Field(default="owner", description="Your role on this project")
-    owner: UserSummary | None = None
+    owner: UserSummary | None = Field(default=None, description="Null for an organization's")
+    organization: OrganizationSummary | None = None
     schedule_timezone: str = Field(
         default="UTC", description="The owner's time zone, which the schedule runs in"
     )
     shares: int = Field(default=0, description="Number of users the project is shared with")
     git_connection: ProjectGitSummary | None = None
     azure_connection: ProjectAzureSummary | None = None
+
+
+class ProjectMove(BaseModel):
+    """Exactly one: into an organization (the personal owner), or to a member (its admins)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    organization_id: uuid.UUID | None = None
+    to_user_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _one_target(self) -> Self:
+        if (self.organization_id is None) == (self.to_user_id is None):
+            raise ValueError("send exactly one of organization_id and to_user_id")
+        return self
+
+
+class ProjectMoved(BaseModel):
+    project_id: uuid.UUID
+    summary: str = Field(description="What moved, what was copied and what was renamed")
 
 
 class PatternTestRequest(BaseModel):

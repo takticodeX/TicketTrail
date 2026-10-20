@@ -76,7 +76,7 @@ def test_admin_lists_every_project_with_its_owner(
         ("marco@example.com", "Billing"),
     ]
     first = page["items"][0]
-    assert set(first) == {"id", "name", "owner", "shares", "created_at", "last_run"}
+    assert set(first) == {"id", "name", "owner", "organization", "shares", "created_at", "last_run"}
     only_marco = client.get(
         f"{API}/admin/projects?owner_id={marco.id}", headers=admin.headers
     ).json()

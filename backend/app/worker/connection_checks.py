@@ -12,7 +12,6 @@ from app.api.v1.schemas import AzureTestResult, GitTestResult
 from app.core.crypto import SecretDecryptionError
 from app.core.urls import UnsafeUrlError, check_public_host
 from app.db.models import AzureConnection, GitAuthType, GitConnection
-from app.db.repositories import AzureConnectionRepository, GitConnectionRepository
 from app.integrations.git.client import (
     GitAuthError,
     GitClient,
@@ -84,11 +83,10 @@ def _azure_test(context: WorkerContext, connection: AzureConnection) -> AzureTes
     return AzureTestResult(ok=True, project_name=project_name)
 
 
-def run_git_connection_check(
-    context: WorkerContext, connection_id: uuid.UUID, owner_id: uuid.UUID
-) -> dict[str, Any]:
+def run_git_connection_check(context: WorkerContext, connection_id: uuid.UUID) -> dict[str, Any]:
+    """The API has already checked that the caller may test this connection."""
     with context.session_factory() as db:
-        connection = GitConnectionRepository(db, owner_id).get(connection_id)
+        connection = db.get(GitConnection, connection_id)
         if connection is None:
             return GitTestResult(ok=False, error="Connection not found.").model_dump(mode="json")
         result = _git_test(context, connection)
@@ -98,11 +96,10 @@ def run_git_connection_check(
     return result.model_dump(mode="json")
 
 
-def run_azure_connection_check(
-    context: WorkerContext, connection_id: uuid.UUID, owner_id: uuid.UUID
-) -> dict[str, Any]:
+def run_azure_connection_check(context: WorkerContext, connection_id: uuid.UUID) -> dict[str, Any]:
+    """The API has already checked that the caller may test this connection."""
     with context.session_factory() as db:
-        connection = AzureConnectionRepository(db, owner_id).get(connection_id)
+        connection = db.get(AzureConnection, connection_id)
         if connection is None:
             return AzureTestResult(ok=False, error="Connection not found.").model_dump(mode="json")
         result = _azure_test(context, connection)

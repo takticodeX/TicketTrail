@@ -15,11 +15,15 @@ from sqlalchemy import func, select
 
 from app.api.deps import AdminUser, DbSession, PageDep
 from app.api.v1.schemas import (
+    AdminOrganizationResponse,
     AdminProjectResponse,
     AdminUserResponse,
     AdminUserSummary,
     AdminUserUpdate,
+    MemberResponse,
+    OrganizationSummary,
     Page,
+    PromoteAdmin,
     RunResponse,
     TransferRequest,
     TransferResponse,
@@ -27,8 +31,21 @@ from app.api.v1.schemas import (
     UserSummary,
 )
 from app.core.errors import AppError, field_error, not_found
-from app.db.models import OwnershipTransfer, Project, ProjectShare, User
-from app.db.repositories import RefreshTokenRepository, project_summaries
+from app.db.models import (
+    Organization,
+    OrganizationMember,
+    OrganizationRole,
+    OwnershipTransfer,
+    Project,
+    ProjectShare,
+    User,
+)
+from app.db.repositories import (
+    MemberRepository,
+    RefreshTokenRepository,
+    owned_counts,
+    project_summaries,
+)
 from app.db.repositories.transfers import owns_anything, transfer_everything, transfer_project
 
 logger = logging.getLogger(__name__)
@@ -94,18 +111,29 @@ def list_all_projects(
     db: DbSession,
     page: PageDep,
     owner_id: Annotated[uuid.UUID | None, Query(description="Only this user's projects")] = None,
+    organization_id: Annotated[
+        uuid.UUID | None, Query(description="Only this organization's projects")
+    ] = None,
 ) -> Page[AdminProjectResponse]:
-    """Every project and its owner: no settings, no secrets, no run details."""
-    query = select(Project, User).join(User, User.id == Project.owner_id)
+    """Every project and its owner (a user or an organization): no settings or secrets."""
+    query = (
+        select(Project, User, Organization)
+        .outerjoin(User, User.id == Project.owner_id)
+        .outerjoin(Organization, Organization.id == Project.organization_id)
+    )
     if owner_id is not None:
         query = query.where(Project.owner_id == owner_id)
+    if organization_id is not None:
+        query = query.where(Project.organization_id == organization_id)
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = db.execute(
-        query.order_by(User.email, Project.name, Project.id)
+        query.order_by(
+            Project.organization_id.is_not(None), Organization.name, User.email, Project.name
+        )
         .offset(page.offset)
         .limit(page.page_size)
     ).all()
-    ids = [project.id for project, _ in rows]
+    ids = [project.id for project, _, _ in rows]
     summaries = project_summaries(db, ids)
     share_rows = db.execute(
         select(ProjectShare.project_id, func.count())
@@ -114,13 +142,16 @@ def list_all_projects(
     ).all()
     shares = {project_id: count for project_id, count in share_rows}
     items = []
-    for project, owner in rows:
+    for project, owner, organization in rows:
         last_run, _ = summaries.get(project.id, (None, 0))
         items.append(
             AdminProjectResponse(
                 id=project.id,
                 name=project.name,
-                owner=_admin_summary(owner),
+                owner=_admin_summary(owner) if owner else None,
+                organization=(
+                    OrganizationSummary.model_validate(organization) if organization else None
+                ),
                 shares=shares.get(project.id, 0),
                 created_at=project.created_at,
                 last_run=RunResponse.model_validate(last_run) if last_run else None,
@@ -184,10 +215,19 @@ def _done(db: DbSession, transfer: OwnershipTransfer) -> TransferResponse:
 def transfer_one_project(
     project_id: uuid.UUID, body: TransferRequest, admin: AdminUser, db: DbSession
 ) -> TransferResponse:
-    """Give a project and its connections to another user (copied if still in use)."""
+    """Give a personal project and its connections to another user (copied if still in use).
+
+    An organization's project is not the administrator's to move: its admins move it.
+    """
     project = db.get(Project, project_id)
     if project is None:
         raise not_found("Project")
+    if project.owner_id is None:
+        raise AppError(
+            409,
+            "organization_project",
+            "This project belongs to an organization. Its admins can move it to a member.",
+        )
     previous = db.get(User, project.owner_id)
     assert previous is not None  # noqa: S101  (the owner's foreign key)
     to = _recipient(db, body, previous)
@@ -224,3 +264,83 @@ def list_transfers(admin: AdminUser, db: DbSession, page: PageDep) -> Page[Trans
         page=page.page,
         page_size=page.page_size,
     )
+
+
+def _organization_responses(
+    db: DbSession, organizations: Sequence[Organization]
+) -> list[AdminOrganizationResponse]:
+    ids = [org.id for org in organizations]
+    rows = db.execute(
+        select(OrganizationMember, User)
+        .join(User, User.id == OrganizationMember.user_id)
+        .where(OrganizationMember.organization_id.in_(ids))
+        .order_by(User.display_name)
+    ).all()
+    people: dict[uuid.UUID, list[MemberResponse]] = {}
+    for member, user in rows:
+        people.setdefault(member.organization_id, []).append(
+            MemberResponse(
+                user=UserSummary.model_validate(user),
+                role=OrganizationRole(member.role).value,
+                created_at=member.created_at,
+            )
+        )
+    responses = []
+    for org in organizations:
+        projects, connections = owned_counts(db, org.id)
+        responses.append(
+            AdminOrganizationResponse(
+                id=org.id,
+                name=org.name,
+                timezone=org.timezone,
+                members=len(people.get(org.id, [])),
+                admins=[p.user for p in people.get(org.id, []) if p.role == "admin"],
+                people=people.get(org.id, []),
+                projects=projects,
+                connections=connections,
+                created_at=org.created_at,
+            )
+        )
+    return responses
+
+
+@router.get("/organizations")
+def list_organizations(
+    admin: AdminUser, db: DbSession, page: PageDep
+) -> Page[AdminOrganizationResponse]:
+    """Every organization with its admins, for when one is left without an admin."""
+    total = db.scalar(select(func.count()).select_from(Organization)) or 0
+    organizations = db.scalars(
+        select(Organization)
+        .order_by(Organization.name, Organization.id)
+        .offset(page.offset)
+        .limit(page.page_size)
+    ).all()
+    return Page(
+        items=_organization_responses(db, organizations),
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
+    )
+
+
+@router.post("/organizations/{organization_id}/admins")
+def promote_admin(
+    organization_id: uuid.UUID, body: PromoteAdmin, admin: AdminUser, db: DbSession
+) -> AdminOrganizationResponse:
+    """Make a member an admin of the organization (it may have lost its last admin)."""
+    organization = db.get(Organization, organization_id)
+    if organization is None:
+        raise not_found("Organization")
+    member = MemberRepository(db, organization_id).get(body.user_id)
+    if member is None:
+        raise field_error("user_id", "Not a member of the organization")
+    member.role = OrganizationRole.ADMIN
+    db.commit()
+    logger.info(
+        "Admin %s made user %s an admin of organization %s",
+        admin.id,
+        body.user_id,
+        organization_id,
+    )
+    return _organization_responses(db, [organization])[0]

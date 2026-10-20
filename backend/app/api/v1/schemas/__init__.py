@@ -12,7 +12,13 @@ from app.api.v1.schemas.auth import (
     UserResponse,
     UserUpdateRequest,
 )
-from app.api.v1.schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Page, UserSummary
+from app.api.v1.schemas.common import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    OrganizationSummary,
+    Page,
+    UserSummary,
+)
 from app.api.v1.schemas.connections import (
     AzureConnectionCreate,
     AzureConnectionResponse,
@@ -23,6 +29,16 @@ from app.api.v1.schemas.connections import (
     GitConnectionUpdate,
     GitTestResult,
 )
+from app.api.v1.schemas.organizations import (
+    AdminOrganizationResponse,
+    MemberCreate,
+    MemberResponse,
+    MemberUpdate,
+    OrganizationCreate,
+    OrganizationResponse,
+    OrganizationUpdate,
+    PromoteAdmin,
+)
 from app.api.v1.schemas.projects import (
     PatternSampleResult,
     PatternTestRequest,
@@ -30,6 +46,8 @@ from app.api.v1.schemas.projects import (
     ProjectAzureSummary,
     ProjectCreate,
     ProjectGitSummary,
+    ProjectMove,
+    ProjectMoved,
     ProjectResponse,
     ProjectUpdate,
 )
@@ -54,6 +72,7 @@ from app.api.v1.schemas.sharing import (
 __all__ = [
     "DEFAULT_PAGE_SIZE",
     "MAX_PAGE_SIZE",
+    "AdminOrganizationResponse",
     "AdminProjectResponse",
     "AdminUserResponse",
     "AdminUserSummary",
@@ -69,6 +88,13 @@ __all__ = [
     "GitTestResult",
     "HealthResponse",
     "LoginRequest",
+    "MemberCreate",
+    "MemberResponse",
+    "MemberUpdate",
+    "OrganizationCreate",
+    "OrganizationResponse",
+    "OrganizationSummary",
+    "OrganizationUpdate",
     "Page",
     "PatternSampleResult",
     "PatternTestRequest",
@@ -76,8 +102,11 @@ __all__ = [
     "ProjectAzureSummary",
     "ProjectCreate",
     "ProjectGitSummary",
+    "ProjectMove",
+    "ProjectMoved",
     "ProjectResponse",
     "ProjectUpdate",
+    "PromoteAdmin",
     "ReadyResponse",
     "RegisterRequest",
     "RunDetailResponse",

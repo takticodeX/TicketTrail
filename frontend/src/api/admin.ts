@@ -1,5 +1,5 @@
 import { apiRequest } from './client';
-import type { Page, SyncRun, User, UserSummary } from './types';
+import type { OrganizationMember, OrganizationSummary, Page, SyncRun, User, UserSummary } from './types';
 
 export interface AdminUser extends User {
   projects: number;
@@ -8,7 +8,9 @@ export interface AdminUser extends User {
 export interface AdminProject {
   id: string;
   name: string;
-  owner: UserSummary & { is_active: boolean };
+  /** Null for an organization's project. */
+  owner: (UserSummary & { is_active: boolean }) | null;
+  organization: OrganizationSummary | null;
   shares: number;
   created_at: string;
   last_run: SyncRun | null;
@@ -48,6 +50,26 @@ export const transferEverything = (userId: string, toUserId: string) =>
   apiRequest<OwnershipTransfer>(`/admin/users/${userId}/transfer`, {
     method: 'POST',
     body: { to_user_id: toUserId },
+  });
+
+export interface AdminOrganization extends OrganizationSummary {
+  timezone: string;
+  members: number;
+  admins: UserSummary[];
+  people: OrganizationMember[];
+  projects: number;
+  connections: number;
+  created_at: string;
+}
+
+export const listAllOrganizations = (page: number, pageSize = 50) =>
+  apiRequest<Page<AdminOrganization>>(`/admin/organizations?page=${page}&page_size=${pageSize}`);
+
+/** Make a member an admin of the organization, for one left without an admin. */
+export const promoteAdmin = (organizationId: string, userId: string) =>
+  apiRequest<AdminOrganization>(`/admin/organizations/${organizationId}/admins`, {
+    method: 'POST',
+    body: { user_id: userId },
   });
 
 export const listTransfers = (page: number, pageSize = 20) =>

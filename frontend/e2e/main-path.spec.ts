@@ -3,7 +3,7 @@ import { expect, request, test, type Page } from '@playwright/test';
 /**
  * The main path (spec section 13): register -> create both connections -> create a
  * project -> dry run -> real sync (Azure faked by the fixtures server) -> history,
- * then sharing the project with a viewer.
+ * then sharing the project with a viewer and moving it into an organization.
  */
 
 const FIXTURES = process.env.E2E_FIXTURES_URL ?? 'https://127.0.0.1:8443';
@@ -14,6 +14,7 @@ const AZURE_PAT = 'e2e-azure-pat-canary';
 
 const email = `e2e-${Date.now()}@example.com`;
 const viewerEmail = `e2e-viewer-${Date.now()}@example.com`;
+const orgName = `E2E Org ${Date.now()}`;
 const password = 'e2e-password-123';
 
 async function pick(page: Page, label: string, option: string) {
@@ -125,14 +126,34 @@ test('register, connect, dry run, sync and see the history', async ({ page }) =>
   await drawer.getByRole('textbox', { name: 'Email' }).fill(viewerEmail);
   await drawer.getByRole('button', { name: 'Share' }).click();
   await expect(drawer.getByRole('table', { name: 'Shared with' }).getByText(viewerEmail)).toBeVisible();
+  await page.keyboard.press('Escape');
 
-  // The viewer sees it under "Shared with me", can dry run, can't sync.
+  // An organization with the viewer as a member; the project moves into it.
+  await page.goto('/settings/organizations');
+  await page.getByRole('button', { name: 'New organization' }).click();
+  const create = page.getByRole('dialog', { name: 'New organization' });
+  await create.getByRole('textbox', { name: 'Name' }).fill(orgName);
+  await create.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name: orgName })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Email' }).fill(viewerEmail);
+  await page.getByRole('button', { name: 'Add member' }).click();
+  await expect(page.getByRole('table', { name: 'Members' }).getByText(viewerEmail)).toBeVisible();
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Demo', exact: true }).click();
+  await page.getByRole('button', { name: 'Move to an organization' }).click();
+  const move = page.getByRole('dialog', { name: 'Move to an organization' });
+  await move.getByRole('textbox', { name: 'Organization' }).click();
+  await page.getByRole('option', { name: orgName }).click();
+  await move.getByRole('button', { name: 'Move' }).click();
+  await expect(page.getByText(`${orgName} · shared with 1`)).toBeVisible();
+
+  // The viewer sees it in the organization's section, can dry run, can't sync.
   await page.context().clearCookies();
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(viewerEmail);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Log in' }).click();
-  await expect(page.getByRole('heading', { name: 'Shared with me' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: orgName })).toBeVisible();
   const card = page.getByLabel('Demo', { exact: true });
   await expect(card.getByText('Viewer')).toBeVisible();
   await expect(card.getByRole('button', { name: 'Sync now' })).toHaveCount(0);

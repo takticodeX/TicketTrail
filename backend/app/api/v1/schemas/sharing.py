@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from app.api.v1.schemas.common import UserSummary
+from app.api.v1.schemas.common import OrganizationSummary, UserSummary
 from app.api.v1.schemas.runs import RunResponse
 
 ShareRoleName = Literal["viewer", "editor"]
@@ -45,7 +45,8 @@ class AdminProjectResponse(BaseModel):
 
     id: uuid.UUID
     name: str
-    owner: AdminUserSummary
+    owner: AdminUserSummary | None = Field(description="Null for an organization's project")
+    organization: OrganizationSummary | None
     shares: int
     created_at: datetime
     last_run: RunResponse | None

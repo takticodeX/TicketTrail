@@ -119,14 +119,25 @@ export function AdminProjectsPage() {
                       </Text>
                     </Table.Td>
                     <Table.Td>
-                      <Text size="sm">{project.owner.display_name}</Text>
-                      <Text size="xs" c="dimmed">
-                        {project.owner.email}
-                      </Text>
-                      {!project.owner.is_active && (
-                        <Badge size="xs" color="gray" variant="light">
-                          Turned off
-                        </Badge>
+                      {project.owner ? (
+                        <>
+                          <Text size="sm">{project.owner.display_name}</Text>
+                          <Text size="xs" c="dimmed">
+                            {project.owner.email}
+                          </Text>
+                          {!project.owner.is_active && (
+                            <Badge size="xs" color="gray" variant="light">
+                              Turned off
+                            </Badge>
+                          )}
+                        </>
+                      ) : (
+                        <Text size="sm">
+                          {project.organization?.name}{' '}
+                          <Badge size="xs" variant="outline">
+                            Organization
+                          </Badge>
+                        </Text>
                       )}
                     </Table.Td>
                     <Table.Td ta="right">{project.shares}</Table.Td>
@@ -140,14 +151,17 @@ export function AdminProjectsPage() {
                       )}
                     </Table.Td>
                     <Table.Td>
-                      <Button
-                        size="xs"
-                        variant="default"
-                        aria-label={`Transfer ${project.name}`}
-                        onClick={() => setMoving(project)}
-                      >
-                        Transfer
-                      </Button>
+                      {/* An organization's admins move its projects themselves. */}
+                      {project.owner && (
+                        <Button
+                          size="xs"
+                          variant="default"
+                          aria-label={`Transfer ${project.name}`}
+                          onClick={() => setMoving(project)}
+                        >
+                          Transfer
+                        </Button>
+                      )}
                     </Table.Td>
                   </Table.Tr>
                 ))}
@@ -165,9 +179,9 @@ export function AdminProjectsPage() {
         explanation={
           moving &&
           `The new owner gets "${moving.name}" and the connections it uses. A connection ` +
-            `${moving.owner.display_name} still uses in another project is copied instead.`
+            `${moving.owner?.display_name ?? 'the owner'} still uses in another project is copied instead.`
         }
-        excludeUserId={moving?.owner.id ?? ''}
+        excludeUserId={moving?.owner?.id ?? ''}
         transfer={(toUserId) => transferProject(moving?.id ?? '', toUserId)}
       />
     </Stack>

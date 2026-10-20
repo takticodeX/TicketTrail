@@ -48,7 +48,8 @@ def start_sync(
     runner: TaskRunnerDep,
 ) -> SyncStarted:
     """Queue a run and return its ID straight away; the worker does the work."""
-    project, role, _ = project_for(db, user, project_id)
+    seen = project_for(db, user, project_id)
+    project, role = seen.project, seen.role
     dry_run = project.dry_run_default if body.dry_run is None else body.dry_run
     if not dry_run and not role.at_least(ProjectRole.EDITOR):
         raise insufficient_role(ProjectRole.EDITOR)

@@ -1,10 +1,12 @@
 """Azure DevOps connections: CRUD and the project-lookup test (run by the worker)."""
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Query, Response, status
 from sqlalchemy.exc import IntegrityError
 
+from app.api.access import connection_for, organization_for
 from app.api.deps import CurrentUser, DbSession, PageDep, SecretBoxDep, TaskRunnerDep
 from app.api.v1.git_connections import TEST_WAIT_SECONDS, connection_in_use, worker_unavailable
 from app.api.v1.schemas import (
@@ -14,7 +16,7 @@ from app.api.v1.schemas import (
     AzureTestResult,
     Page,
 )
-from app.core.errors import AppError, not_found
+from app.core.errors import AppError
 from app.db.models import AzureConnection
 from app.db.repositories import AzureConnectionRepository, ProjectRepository
 from app.worker import task_names
@@ -27,6 +29,7 @@ def to_response(connection: AzureConnection) -> AzureConnectionResponse:
     return AzureConnectionResponse(
         id=connection.id,
         name=connection.name,
+        organization_id=connection.organization_id,
         organization_url=connection.organization_url,
         azure_project=connection.azure_project,
         has_secret=bool(connection.pat_enc),
@@ -37,22 +40,37 @@ def to_response(connection: AzureConnection) -> AzureConnectionResponse:
     )
 
 
-def _get_or_404(repo: AzureConnectionRepository, connection_id: uuid.UUID) -> AzureConnection:
-    connection = repo.get(connection_id)
-    if connection is None:
-        raise not_found("Azure connection")
-    return connection
+def _scope(
+    db: DbSession, user: CurrentUser, organization_id: uuid.UUID | None, *, admin: bool
+) -> AzureConnectionRepository:
+    """The caller's own connections, or an organization's (members read, admins write)."""
+    if organization_id is None:
+        return AzureConnectionRepository(db, user.id)
+    organization_for(db, user, organization_id, admin=admin)
+    return AzureConnectionRepository(db, organization_id=organization_id)
 
 
-def _name_taken() -> AppError:
-    return AppError(409, "name_taken", "You already have an Azure connection with this name.")
+def _get(
+    db: DbSession, user: CurrentUser, connection_id: uuid.UUID, *, write: bool = False
+) -> AzureConnection:
+    return connection_for(db, user, AzureConnection, connection_id, "Azure connection", write=write)
+
+
+def _name_taken(*, organization: bool = False) -> AppError:
+    whose = "The organization already has" if organization else "You already have"
+    return AppError(409, "name_taken", f"{whose} an Azure connection with this name.")
 
 
 @router.get("")
 def list_azure_connections(
-    user: CurrentUser, db: DbSession, page: PageDep
+    user: CurrentUser,
+    db: DbSession,
+    page: PageDep,
+    organization_id: Annotated[
+        uuid.UUID | None, Query(description="An organization's connections instead of yours")
+    ] = None,
 ) -> Page[AzureConnectionResponse]:
-    items, total = AzureConnectionRepository(db, user.id).list(
+    items, total = _scope(db, user, organization_id, admin=False).list(
         offset=page.offset, limit=page.page_size
     )
     return Page(
@@ -67,9 +85,10 @@ def list_azure_connections(
 def create_azure_connection(
     body: AzureConnectionCreate, user: CurrentUser, db: DbSession, box: SecretBoxDep
 ) -> AzureConnectionResponse:
-    repo = AzureConnectionRepository(db, user.id)
+    """Personal, or the organization's when organization_id is set (admins only)."""
+    repo = _scope(db, user, body.organization_id, admin=True)
     if repo.name_taken(body.name):
-        raise _name_taken()
+        raise _name_taken(organization=body.organization_id is not None)
     connection = repo.add(
         AzureConnection(
             name=body.name,
@@ -86,7 +105,7 @@ def create_azure_connection(
 def get_azure_connection(
     connection_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> AzureConnectionResponse:
-    return to_response(_get_or_404(AzureConnectionRepository(db, user.id), connection_id))
+    return to_response(_get(db, user, connection_id))
 
 
 @router.patch("/{connection_id}")
@@ -97,13 +116,13 @@ def update_azure_connection(
     db: DbSession,
     box: SecretBoxDep,
 ) -> AzureConnectionResponse:
-    repo = AzureConnectionRepository(db, user.id)
-    connection = _get_or_404(repo, connection_id)
+    connection = _get(db, user, connection_id, write=True)
+    repo = AzureConnectionRepository.owning(db, connection)
     before = (connection.organization_url, connection.azure_project, connection.pat_enc)
 
     if body.name is not None:
         if repo.name_taken(body.name, exclude_id=connection.id):
-            raise _name_taken()
+            raise _name_taken(organization=connection.organization_id is not None)
         connection.name = body.name
     if body.organization_url is not None:
         connection.organization_url = body.organization_url
@@ -123,8 +142,8 @@ def update_azure_connection(
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_azure_connection(connection_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Response:
     """Refused (409) while a project uses the connection."""
-    connection = _get_or_404(AzureConnectionRepository(db, user.id), connection_id)
-    in_use = ProjectRepository(db, user.id).names_using(azure_connection_id=connection.id)
+    connection = _get(db, user, connection_id, write=True)
+    in_use = ProjectRepository.owning(db, connection).names_using(azure_connection_id=connection.id)
     if in_use:
         raise connection_in_use(in_use)
     try:
@@ -141,12 +160,12 @@ def test_azure_connection(
     connection_id: uuid.UUID, user: CurrentUser, db: DbSession, runner: TaskRunnerDep
 ) -> AzureTestResult:
     """Looks the project up in Azure DevOps (on the worker) with the saved PAT."""
-    connection = _get_or_404(AzureConnectionRepository(db, user.id), connection_id)
+    connection = _get(db, user, connection_id)
     db.close()
     try:
         result = runner.run(
             task_names.TEST_AZURE_CONNECTION,
-            [str(connection.id), str(user.id)],
+            [str(connection.id)],
             timeout=TEST_WAIT_SECONDS,
         )
     except WorkerUnavailableError as exc:

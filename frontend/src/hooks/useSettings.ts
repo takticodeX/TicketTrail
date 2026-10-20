@@ -11,12 +11,19 @@ export const settingsKeys = {
   project: (id: string) => ['projects', id] as const,
 };
 
-export function useGitConnections() {
-  return useQuery({ queryKey: settingsKeys.git, queryFn: api.listGitConnections });
+/** Yours, or an organization's. Keys share a prefix, so saving one refreshes all. */
+export function useGitConnections(organizationId?: string | null) {
+  return useQuery({
+    queryKey: organizationId ? [...settingsKeys.git, organizationId] : settingsKeys.git,
+    queryFn: () => api.listGitConnections(organizationId ?? undefined),
+  });
 }
 
-export function useAzureConnections() {
-  return useQuery({ queryKey: settingsKeys.azure, queryFn: api.listAzureConnections });
+export function useAzureConnections(organizationId?: string | null) {
+  return useQuery({
+    queryKey: organizationId ? [...settingsKeys.azure, organizationId] : settingsKeys.azure,
+    queryFn: () => api.listAzureConnections(organizationId ?? undefined),
+  });
 }
 
 export function useProjects() {

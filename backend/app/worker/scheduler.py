@@ -1,20 +1,21 @@
 """Scheduled syncs (spec section 7): a dispatcher that Celery Beat calls every minute.
 
 Schedules live in the database (projects.schedule_cron, evaluated in the owner's
-time zone), so a change in the UI applies at the next minute without a restart.
-Each schedule slot fires at most once: it is claimed with an atomic update of
-projects.schedule_last_fired_at, which also makes several schedulers safe.
+time zone: the user's, or the organization's), so a change in the UI applies at the
+next minute without a restart. Each schedule slot fires at most once: it is claimed
+with an atomic update of projects.schedule_last_fired_at, which also makes several
+schedulers safe.
 """
 
 import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.cron import latest_slot
-from app.db.models import Project, RunStatus, RunTrigger, SyncRun, User
+from app.db.models import Organization, Project, RunStatus, RunTrigger, SyncRun, User
 from app.worker import task_names
 from app.worker.context import WorkerContext
 from app.worker.runner import TaskRunner, WorkerUnavailableError
@@ -47,12 +48,14 @@ def dispatch_due_schedules(
     started: list[uuid.UUID] = []
     with context.session_factory() as db:
         rows = db.execute(
-            select(Project, User.timezone)
-            .join(User, User.id == Project.owner_id)
+            select(Project, func.coalesce(Organization.timezone, User.timezone, "UTC"))
+            .outerjoin(User, User.id == Project.owner_id)
+            .outerjoin(Organization, Organization.id == Project.organization_id)
             .where(
                 Project.schedule_enabled.is_(True),
                 Project.schedule_cron.is_not(None),
-                User.is_active.is_(True),
+                # A turned-off account's projects stop; an organization's keep running.
+                or_(Project.organization_id.is_not(None), User.is_active.is_(True)),
             )
         ).all()
         for project, timezone in rows:

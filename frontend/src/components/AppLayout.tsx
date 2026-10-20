@@ -21,6 +21,7 @@ const SETTINGS_LINKS = [
   { to: '/settings/projects', label: 'Projects' },
   { to: '/settings/git', label: 'Git connections' },
   { to: '/settings/azure', label: 'Azure connections' },
+  { to: '/settings/organizations', label: 'Organizations' },
   { to: '/settings/profile', label: 'Profile' },
 ];
 
@@ -110,6 +111,13 @@ export function AppLayout() {
               to="/admin/projects"
               label="Projects"
               active={pathname.startsWith('/admin/projects')}
+              onClick={close}
+            />
+            <NavLink
+              component={Link}
+              to="/admin/organizations"
+              label="Organizations"
+              active={pathname.startsWith('/admin/organizations')}
               onClick={close}
             />
           </NavLink>

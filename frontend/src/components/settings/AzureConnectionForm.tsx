@@ -31,9 +31,11 @@ interface Props {
   connection: AzureConnection | null;
   onSaved: (connection: AzureConnection) => void;
   onClose: () => void;
+  /** A new connection is created for this organization instead of for the user. */
+  organizationId?: string;
 }
 
-export function AzureConnectionForm({ connection, onSaved, onClose }: Props) {
+export function AzureConnectionForm({ connection, onSaved, onClose, organizationId }: Props) {
   const save = useSaveAzureConnection();
   const test = useTestAzureConnection();
   const [formError, setFormError] = useState<string | null>(null);
@@ -78,7 +80,8 @@ export function AzureConnectionForm({ connection, onSaved, onClose }: Props) {
       setTestResult(null);
       let saved: AzureConnection;
       try {
-        saved = await save.mutateAsync({ id: connection?.id, body: toInput(values) });
+        const body = connection ? toInput(values) : { ...toInput(values), organization_id: organizationId };
+        saved = await save.mutateAsync({ id: connection?.id, body });
       } catch (error) {
         setFormError(applyServerErrors(error, setError, FIELDS));
         return;
