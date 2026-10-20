@@ -9,6 +9,7 @@ TicketTrail is a Dockerized, multi-user web app. It reads commits from any Git r
 **Goals**
 
 - Each user manages their own **projects**. A project pairs one Git connection with one Azure DevOps board.
+- A project can be **shared** with other users as viewer or editor (section 4, *Access rules*). An administrator can transfer projects to another owner, for example when a colleague leaves.
 - Git access works with any HTTPS Git host: Azure Repos (the first target), GitHub, GitLab, Bitbucket, Gitea and self-hosted servers.
 - Ticket references are found with a regex pattern set per project. The default is `AB#(\d+)`.
 - A sync can run on demand ("Sync now") or on a schedule set per project.
@@ -54,9 +55,9 @@ Requests flow left to right. The API only stores settings and queues work; the w
 | `frontend` | React 18 + Vite + TypeScript, served by Nginx | Single-page app. Nginx also proxies `/api` to the backend |
 | `api` | Python 3.12, FastAPI, SQLAlchemy 2, Alembic, Pydantic v2 | REST API, authentication, settings, starts sync runs |
 | `worker` | Same image as `api`, runs Celery | Runs sync jobs: Git fetch, parsing, posting to Azure |
-| `scheduler` | Same image, runs Celery Beat (database-backed schedule) | Starts scheduled syncs on each project's cron |
+| `scheduler` | Same image, runs Celery Beat | Ticks once a minute; the tick starts every scheduled sync that came due (section 7) |
 | `db` | PostgreSQL 16 | All persistent data |
-| `redis` | Redis 7 | Celery broker and per-project sync locks |
+| `redis` | Redis 7 | Celery broker and result backend, per-project sync locks, the Azure concurrency limit and login rate limits |
 
 **Libraries**
 
@@ -64,29 +65,53 @@ Requests flow left to right. The API only stores settings and queues work; the w
 - **Azure DevOps:** `httpx` against the REST API directly, wrapped in a client class. Avoid the heavyweight Azure SDK.
 - **Secrets:** `cryptography` (Fernet). The key comes from the environment variable `TT_ENCRYPTION_KEY`.
 - **Auth:** `argon2-cffi` for password hashing and `PyJWT` for access and refresh tokens.
-- **Scheduling:** `celery-redbeat` or `sqlalchemy-celery-beat`, so schedules can be changed at runtime from the UI.
-- **Frontend:** React Router, TanStack Query, React Hook Form + Zod, and Mantine as the UI component library.
-- **Testing:** pytest, `respx` to mock httpx, testcontainers for Postgres, Vitest and Playwright for the frontend.
+- **Scheduling:** plain Celery Beat runs one dispatcher task (`tickettrail.dispatch_schedules`) every minute. The dispatcher reads the schedules from the database and evaluates them with `croniter`, so schedules change at runtime from the UI without `celery-redbeat` or `sqlalchemy-celery-beat`.
+- **Regex:** the `regex` package, for its per-match timeout.
+- **Frontend:** React Router, TanStack Query, React Hook Form + Zod, and Mantine as the UI component library. `cron-parser` and `cronstrue` for the schedule field, `react-markdown` for the template preview.
+- **Testing:** pytest, `respx` to mock httpx, testcontainers for Postgres and Redis, Vitest and Playwright for the frontend.
 
-Repository volumes: each project's repo is cloned as a bare/mirror clone into the volume `repos_data` at `/data/repos/<project_id>`. Later syncs only `git fetch`.
+Repository volumes: each project's repo is kept as a bare, blobless clone of its branches (`git clone --bare --filter=blob:none`) in the volume `repos_data` at `/data/repos/<project_id>`. Later syncs only `git fetch`. A `--mirror` clone is not used: it also fetches every other ref, such as GitHub's `refs/pull/*`, which can be gigabytes.
 
 ## 4. Data model
 
-Every user-owned row carries `owner_id`, and every query filters on it. Connections are reusable: one Azure connection can serve several projects. All tables use UUID primary keys and `created_at` / `updated_at` timestamps.
+Every user-owned row carries `owner_id`. Connections are reusable: one Azure connection can serve several projects. All tables use UUID primary keys and `created_at` / `updated_at` timestamps.
 
 | Table | Key columns | Notes |
 | --- | --- | --- |
 | `users` | `email` (unique), `password_hash`, `display_name`, timezone (IANA, default UTC), `role` (`user` \| `admin`), `is_active` | The first registered user becomes `admin` |
 | `git_connections` | `owner_id`, `name`, `repo_url`, `auth_type` (`token` \| `basic` \| `none`), `username`, `secret_enc`, commit\_url\_template (nullable), `last_test_at`, `last_test_ok` | `secret_enc` = Fernet-encrypted token or password |
 | `azure_connections` | `owner_id`, `name`, `organization_url` (e.g. `https://dev.azure.com/acme`), `azure_project`, `pat_enc`, `last_test_at`, `last_test_ok` | PAT needs the *Work Items (Read & Write)* scope |
-| `projects` | `owner_id`, `name`, `git_connection_id`, `azure_connection_id`, `branches` (text\[\]; empty = default branch only), `ticket_pattern` (default `AB#(\d+)`), `comment_template`, `start_from` (date or SHA), `include_merge_commits` (bool, default false), `schedule_cron` (nullable), `schedule_enabled`, `dry_run_default` | One repo → one board |
-| `sync_runs` | `project_id`, `trigger` (`manual` \| `scheduled`), `dry_run`, `status` (`queued` \| `running` \| `success` \| `partial` \| `failed` \| skipped), `started_at`, `finished_at`, `commits_scanned`, `comments_posted`, `skipped`, `errors`, `error_message` | One row per sync run |
-| `sync_run_items` | `sync_run_id`, `commit_sha`, `work_item_id`, `action` (`posted` \| `would_post` \| `skipped_duplicate` \| `skipped_not_found` \| `no_reference` \| `error`), `detail` | The audit trail shown in the UI |
+| `projects` | `owner_id`, `name` (unique per owner), `git_connection_id`, `azure_connection_id`, `branches` (text\[\]; empty = default branch only), `ticket_pattern` (default `AB#(\d+)`), `comment_template`, `start_from` (date or SHA), `include_merge_commits` (bool, default false), `schedule_cron` (nullable), `schedule_enabled`, `schedule_last_fired_at`, `dry_run_default` | One repo → one board. `schedule_last_fired_at` makes each schedule slot fire once (section 7) |
+| `project_shares` | `project_id`, `user_id`, `role` (`viewer` \| `editor`) | **Unique (`project_id`, `user_id`)**. Deleted with the project or the user |
+| `sync_runs` | `project_id`, `trigger` (`manual` \| `scheduled`), `dry_run`, `status` (`queued` \| `running` \| `success` \| `partial` \| `failed` \| `skipped` \| `cancelled`), `started_at`, `finished_at`, `commits_scanned`, `comments_posted`, `skipped`, `errors`, `error_message`, `cancel_requested`, `triggered_by_id` (nullable) | One row per sync run. `triggered_by_id` is the user who started a manual run; null for scheduled runs |
+| `sync_run_items` | `sync_run_id`, `position`, `commit_sha`, `commit_subject`, `branch`, `work_item_id`, `action` (`posted` \| `would_post` \| `skipped_duplicate` \| `skipped_not_found` \| `no_reference` \| `error`), `detail` | The audit trail shown in the UI. `position` orders the items (oldest commit first) |
 | `posted_comments` | `project_id`, `commit_sha`, `work_item_id`, `azure_comment_id`, status (pending \| posted), `posted_at` | **Unique (`project_id`, `commit_sha`, `work_item_id`)**: this is what guarantees a commit is never posted twice |
 | `project_cursors` | `project_id`, `branch`, `last_sha` | Where the last successful sync stopped on each branch |
-| `refresh_tokens` | `user_id`, `token_hash`, `expires_at`, `revoked` | Lets sessions be revoked |
+| `refresh_tokens` | `user_id`, `token_hash`, `expires_at`, `revoked`, `revoked_at` | Lets sessions be revoked. `revoked_at` gives a rotated token a short grace period (section 10) |
+| `ownership_transfers` | `admin_id`, `from_user_id`, `to_user_id`, `project_id` (null when everything was moved), `projects_moved`, `connections_moved`, `connections_copied`, `summary` | Audit trail of the administrator's transfers |
 
-`posted_comments` is the source of truth for de-duplication. `project_cursors` is only an optimization so the app doesn't rescan the whole history. If the cursors are deleted, a full rescan still posts nothing twice.
+`posted_comments` is the source of truth for de-duplication. `project_cursors` is only an optimization so the app doesn't rescan the whole history. If the cursors are deleted, a full rescan still posts nothing twice. Deleting runs from the history never affects `posted_comments`.
+
+**Access rules**
+
+Connections are private to their owner: every query on them filters on `owner_id`. A project is visible to its owner and to the users it is shared with. All project and run queries go through one permission check, with the roles in this order: viewer < editor < owner.
+
+| Action | Viewer | Editor | Owner |
+| --- | :---: | :---: | :---: |
+| See the project, its runs and their items; test the pattern | ✓ | ✓ | ✓ |
+| Start a dry run | ✓ | ✓ | ✓ |
+| Cancel or delete a dry run they started themselves | ✓ | ✓ | ✓ |
+| Start a real sync; cancel or delete any run; clear the history | | ✓ | ✓ |
+| Change the settings: name, branches, pattern, template, start point, merge commits, schedule, dry-run default | | ✓ | ✓ |
+| Change the Git or Azure connection | | | ✓ |
+| Share the project, change or remove shares, delete the project | | | ✓ |
+
+- A user with no access gets **404**, as if the project didn't exist. A user with access but too weak a role gets **403** with the code `insufficient_role`.
+- Shared users never see or use the owner's connections directly. A project response carries secret-free summaries of its connections (name, repo URL, host, commit link pattern; organization URL and Azure project), so the UI can show them.
+- Syncs of a shared project use the owner's connections, and its schedule runs in the owner's time zone.
+- Project names stay unique per owner, also when an editor renames a project.
+- Anyone a project is shared with can leave it.
+- Administrators don't see other users' projects. They can list every project with its owner (no settings, no runs) and transfer projects (section 8).
 
 ## 5. Git integration and ticket parsing
 
@@ -108,7 +133,7 @@ TicketTrail talks to Git through plain Git over HTTPS, so any host works. Code s
 
 **Reading commits**
 
-1. First sync: `git clone --mirror` into `/data/repos/<project_id>`. Later syncs: `git fetch --prune`.
+1. First sync: `git clone --bare --no-tags --filter=blob:none` into `/data/repos/<project_id>` (branches only, see section 3). Later syncs: `git fetch --prune`.
 2. Resolve the branches: the configured list, or the remote's default branch (`HEAD`) if the list is empty.
 3. For each branch, list the commits from the cursor to the branch tip, oldest first: `git log --reverse --format=<NUL-separated fields> <cursor>..<branch>`. With no cursor, start from `start_from` if it is set; otherwise list the full history.
 4. Fields per commit: SHA, author name and email, author date, committer date, subject, full body, and the number of parents.
@@ -166,25 +191,29 @@ The template is Markdown and can be edited per project. Default:
 
 - **401/403:** mark the connection as failing and stop the run. Report "PAT invalid, expired or missing scope".
 - **404 / work item missing:** record the item as `skipped_not_found` and continue with the rest.
+- **404 on the existence check itself** (wrong organization or project): fail the run without moving any cursor. Treating it as "every work item is missing" would skip those commits for good.
 - **429 or 503:** honor `Retry-After`. Otherwise use exponential backoff with jitter (1 s, 2 s, 4 s … up to 60 s, at most 5 attempts).
 - Also honor Azure's `X-RateLimit-Delay` / `Retry-After` throttling headers.
 - Make at most 5 concurrent requests per Azure organization, across all workers.
 
 ## 7. Sync engine
 
-A sync run is one Celery task, `sync_project(project_id, trigger, dry_run)`. A run is safe to repeat at any point: running it twice, or after a crash, never produces a duplicate comment.
+A sync run is one Celery task, `sync_project(project_id, trigger, dry_run, run_id)`. The API or the scheduler creates the `sync_runs` row first and passes its ID. A run is safe to repeat at any point: running it twice, or after a crash, never produces a duplicate comment.
 
 **Triggers**
 
-- **Manual:** the "Sync now" button calls `POST /api/projects/{id}/sync`. The API creates a `sync_runs` row with status `queued`, sends the task to Celery, and returns the run ID straight away.
-- **Scheduled:** each project has an optional 5-field cron expression (`schedule_cron`) and a switch (`schedule_enabled`). The scheduler reads them from the database, so changes in the UI take effect without a restart.
+- **Manual:** the "Sync now" and "Dry run" buttons call `POST /api/v1/projects/{id}/sync`. The API creates a `sync_runs` row with status `queued` (recording who started it), sends the task to Celery, and returns the run ID straight away. Without `dry_run` in the body, the project's `dry_run_default` applies.
+- **Scheduled:** each project has an optional 5-field cron expression (`schedule_cron`) and a switch (`schedule_enabled`). Celery Beat runs a dispatcher every minute, which reads the schedules from the database, so changes in the UI take effect within a minute and without a restart.
+  - The dispatcher claims each due slot with an atomic update of `schedule_last_fired_at`, so a slot fires at most once, even with several schedulers. Saving a new or changed schedule sets it to "now": slots that already passed never fire.
   - The minimum interval is 5 minutes, set with `TT_MIN_SCHEDULE_MINUTES`.
-  - Cron is evaluated in the user's time zone, which is stored on the user's profile and defaults to UTC.
-- **Dry run:** a run with `dry_run=true` does every step except posting. Items are recorded as `would_post`, and no cursors are moved.
+  - Cron is evaluated in the **owner's** time zone, which is stored on the user's profile and defaults to UTC.
+  - Projects of turned-off accounts are not scheduled.
+  - Scheduled runs follow the project's `dry_run_default`.
+- **Dry run:** a run with `dry_run=true` does every step except posting (it does check that the work items exist). Items are recorded as `would_post`, pending rows are not recovered, and no cursors are moved.
 
 **One run, step by step**
 
-1. Take a Redis lock `tt:sync:<project_id>` with a 30-minute time-to-live. If the lock is already held, mark the new run `skipped` and stop. Only one run per project at a time.
+1. Take a Redis lock `tt:sync:<project_id>` (value: the run ID) with a 30-minute time-to-live, refreshed by the run's heartbeat. If the lock is already held, mark the new run `skipped` and stop. Only one run (real or dry) per project at a time.
 2. Set the run to `running`. Decrypt the credentials in memory only.
 3. Fetch the repo and list the new commits (section 5).
 4. Extract the work item IDs from each commit. Commits with no match are recorded as `no_reference`.
@@ -195,7 +224,15 @@ A sync run is one Celery task, `sync_project(project_id, trigger, dry_run)`. A r
    2. Post the comment to Azure.
    3. Update the row to `posted`, store the `azure_comment_id`, and record the item as `posted`.
 8. Move each branch cursor forward only past commits whose pairs all succeeded or were skipped for good. If anything failed with an error that may go away, leave the cursor where it is so the next run retries it.
-9. Finish the run with status `success`, `partial` (some errors) or `failed`, and store the counters. Release the lock.
+9. Finish the run with status `success`, `partial` (some errors or warnings, such as a missing branch or rewritten history) or `failed`, and store the counters. Release the lock.
+
+**Cancelling**
+
+`POST /runs/{id}/cancel` sets `cancel_requested`. A queued run never starts. A running run stops between commits, keeps what it already posted, and ends as `cancelled`; the next run continues from there.
+
+**Stalled runs**
+
+A running run updates its row every few seconds (the heartbeat). A queued or running run whose row hasn't changed for 10 minutes (or twice `TT_GIT_TIMEOUT`, if longer) is marked `failed` with an explanation, and its lock is cleared. The worker checks for these when it starts and before each run of the same project.
 
 **Crash recovery**
 
@@ -206,30 +243,42 @@ If a run finds a `pending` row left behind by an earlier crash, it reads that wo
 
 ## 8. REST API contract
 
-The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoint except auth and health needs `Authorization: Bearer <access token>`. Resources owned by someone else return **404**, not 403, so their IDs don't leak. Secrets are write-only: responses return `"has_secret": true` and never the value.
+The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoint except auth and health needs `Authorization: Bearer <access token>`. Resources the caller can't access return **404**, not 403, so their IDs don't leak; a shared project with too weak a role returns **403** `insufficient_role` (section 4, *Access rules*). Secrets are write-only: responses return `"has_secret": true` and never the value.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| GET | `/auth/config` | Public: whether registration is open |
 | POST | `/auth/register` | Create an account. Can be turned off with `TT_ALLOW_REGISTRATION=false` |
 | POST | `/auth/login` | Returns an access token (15 min) and a refresh token (7 days, httpOnly cookie) |
-| POST | `/auth/refresh` · `/auth/logout` | Rotate or revoke the refresh token |
+| POST | `/auth/refresh` · `/auth/logout` | Rotate or revoke the refresh token. Require the header `X-Requested-With: TicketTrail` (CSRF) |
 | GET / PATCH | `/me` | Profile: name, time zone, password change |
-| GET / POST | `/git-connections` | List / create |
-| GET / PATCH / DELETE | `/git-connections/{id}` | Read / update / delete. Delete is refused while a project uses the connection |
-| POST | `/git-connections/{id}/test` | Runs `git ls-remote`, returns `{ok, branches[], default_branch, error}` |
-| GET / POST | `/azure-connections` | List / create |
-| GET / PATCH / DELETE | `/azure-connections/{id}` | Read / update / delete |
-| POST | `/azure-connections/{id}/test` | Returns `{ok, project_name, error}` |
-| GET / POST | `/projects` | List / create |
-| GET / PATCH / DELETE | `/projects/{id}` | Read / update / delete |
-| POST | `/projects/{id}/test-pattern` | Body `{pattern, samples[]}`, returns the IDs found in each sample |
-| POST | `/projects/{id}/sync` | Body `{dry_run: bool}`. Returns `202` with `{run_id}` |
-| GET | `/projects/{id}/runs` | Paginated run history |
-| GET | `/runs/{run_id}` | Run detail with counters |
-| GET | `/runs/{run_id}/items` | Paginated items, filterable by `action` |
-| POST | `/runs/{run_id}/cancel` | Cooperative cancel: the worker checks a flag between commits |
-| GET | `/admin/users` · PATCH `/admin/users/{id}` | Admin only: list users, turn accounts on or off |
+| GET / POST | `/git-connections` | List / create (the caller's own) |
+| GET / PATCH / DELETE | `/git-connections/{id}` | Read / update / delete. Delete is refused (409, naming the projects) while a project uses the connection |
+| POST | `/git-connections/{id}/test` | Runs `git ls-remote` in the worker, returns `{ok, branches[], default_branch, error}` |
+| GET / POST | `/azure-connections` | List / create (the caller's own) |
+| GET / PATCH / DELETE | `/azure-connections/{id}` | Read / update / delete. Delete is refused while a project uses the connection |
+| POST | `/azure-connections/{id}/test` | Runs in the worker, returns `{ok, project_name, error}` |
+| GET / POST | `/projects` | List (`?scope=all\|owned\|shared`, default `all`) / create. Each project carries the caller's `role`, its `owner`, the number of `shares`, `schedule_timezone` (the owner's), the connection summaries and the dashboard fields (`last_run`, `next_run_at`, `comments_posted`) |
+| GET / PATCH / DELETE | `/projects/{id}` | Read (viewer) / update (editor; connections owner only) / delete (owner) |
+| POST | `/projects/test-pattern` | Body `{pattern, samples[]}`: try a pattern before the project exists |
+| POST | `/projects/{id}/test-pattern` | Body `{pattern?, samples[]}` (default: the saved pattern), returns the IDs found in each sample |
+| POST | `/projects/{id}/sync` | Body `{dry_run?: bool}` (default: the project's `dry_run_default`). Returns `202` with `{run_id}`. Dry run: viewer; real sync: editor |
+| GET | `/projects/{id}/runs` | Paginated run history, newest first |
+| DELETE | `/projects/{id}/runs` | Editor: delete the finished runs, optionally only `?dry_run=true\|false`. Returns `{deleted}` |
+| GET / POST | `/projects/{id}/shares` | Owner: list shares / share with `{email, role}` (the exact email of an active user; otherwise 404 `user_not_found`) |
+| PATCH / DELETE | `/projects/{id}/shares/{user_id}` | Owner: change the role / remove the share. A user can also delete their own share (leave) |
+| GET | `/runs/{run_id}` | Run detail with counters and `counts_by_action` |
+| GET | `/runs/{run_id}/items` | Paginated items, oldest commit first, filterable by `action` |
+| POST | `/runs/{run_id}/cancel` | Cooperative cancel: the worker checks a flag between commits. 409 if already finished |
+| DELETE | `/runs/{run_id}` | Delete a finished run and its items (409 while active) |
+| GET | `/admin/users` · PATCH `/admin/users/{id}` | Admin only: list users (with their project count), turn accounts on or off |
+| GET | `/admin/projects` | Admin only: every project with its owner, share count and last run (`?owner_id=` to filter). No settings |
+| POST | `/admin/projects/{id}/transfer` | Admin only: body `{to_user_id}`. Gives the project and its connections to an active user; a connection the previous owner still uses elsewhere is copied |
+| POST | `/admin/users/{id}/transfer` | Admin only: body `{to_user_id}`. Gives everything the user owns (projects and connections) to an active user |
+| GET | `/admin/transfers` | Admin only: the transfer history, newest first |
 | GET | `/health` · `/ready` | Liveness / readiness (database, Redis) |
+
+Run actions follow the access rules: cancel and delete need an editor, except a viewer's own dry runs. Transfers keep secrets encrypted as they are, carry the run history and posted comments along, drop a share the new owner had on the project, and add a suffix such as "(from Marco)" to names the new owner already uses.
 
 Errors use one shape: `{"error": {"code": "string", "message": "human readable", "details": {}}}`. List endpoints take `?page=&page_size=` (default 25, max 100).
 
@@ -240,13 +289,14 @@ The UI is a responsive single-page app with light and dark themes. Everything a 
 | Page | Route | Contents |
 | --- | --- | --- |
 | Login / Register | `/login`, `/register` | Email + password. Register is hidden when registration is turned off |
-| Dashboard | `/` | One card per project: last run status and time, next scheduled run, comments posted, and **Sync now** / **Dry run** buttons |
-| Project detail | `/projects/:id` | Run history table. Click a run to open its item list (commit SHA, message subject, work item ID with a link to Azure, action, detail), with filters by action |
+| Dashboard | `/` | One card per project: last run status and time, next scheduled run, comments posted, and **Sync now** / **Dry run** buttons. Projects shared with the user appear under **Shared with me**, with their role and owner |
+| Project detail | `/projects/:id` | Run history table (who started each manual run), **Delete** per run and **Clear dry runs**. **Share** (owner) opens a drawer to share by email, change roles and remove shares; **Leave** (shared users). Click a run to open its item list (commit SHA, message subject, work item ID with a link to Azure, action, detail), with filters by action, **Cancel** and **Delete** |
 | Settings → Git connections | `/settings/git` | List plus a form: name, repo URL, auth type, username (prefilled for the detected host), token or password, commit URL template, **Test connection** (shows the branches found) |
 | Settings → Azure connections | `/settings/azure` | List plus a form: name, organization URL, project, PAT, **Test connection** |
-| Settings → Projects | `/settings/projects` | Wizard: pick a Git connection → branches → pick an Azure connection → ticket pattern with **live pattern tester** → comment template with **live preview** → start point → schedule |
+| Settings → Projects | `/settings/projects`, `/settings/projects/new`, `/settings/projects/:id` | List of the projects the user can see, then the wizard: pick a Git connection → branches → pick an Azure connection → ticket pattern with **live pattern tester** → comment template with **live preview** → start point → schedule. For an editor the connections are locked; a viewer is told only editors can change the settings |
 | Settings → Profile | `/settings/profile` | Display name, time zone, change password |
-| Admin → Users | `/admin/users` | Admins only: list users, turn accounts on or off |
+| Admin → Users | `/admin/users` | Admins only: list users, turn accounts on or off, **Transfer all** of a user's projects and connections |
+| Admin → Projects | `/admin/projects` | Admins only: every project with its owner, **Transfer** to another user, and the transfer history |
 
 **UI rules**
 
@@ -254,6 +304,7 @@ The UI is a responsive single-page app with light and dark themes. Everything a 
 - The schedule field offers presets (every 15 min, hourly, daily at 08:00, weekdays at 08:00) plus a custom cron. It shows the next three run times in plain language.
 - The run detail page polls every 2 s while the run is `queued` or `running`.
 - Every destructive action asks for confirmation.
+- Buttons follow the access rules (section 4): what a user's role doesn't allow isn't shown. The API enforces the same rules.
 - All forms validate on the client with Zod, using the same rules as the API (pattern rules, URL format, cron syntax).
 
 ## 10. Security
@@ -262,12 +313,13 @@ TicketTrail stores other systems' credentials, so the security rules below are r
 
 - **Secrets at rest:** Fernet-encrypt every token, PAT and password with `TT_ENCRYPTION_KEY`. Support key rotation with `TT_ENCRYPTION_KEY_OLD` and a `manage.py rotate-keys` command.
 - **Secrets in transit and in logs:** never return secrets from the API or log them. A logging filter scrubs `Authorization` headers, URLs with credentials in them, and known secret fields. Git error output is cleaned before it is stored in `sync_run_items.detail`.
-- **Tenant isolation:** every repository-layer query goes through an owner filter. Add tests where user B tries to read, change, sync and test user A's resources.
-- **Passwords:** Argon2id hashing, at least 10 characters, and login rate limits (5 attempts a minute per IP and per email).
-- **Tokens:** JWT access tokens signed with HS256 using `TT_JWT_SECRET`. Refresh tokens are httpOnly, Secure and SameSite=Strict, stored hashed, and rotated each time they are used.
+- **Tenant isolation:** connection queries go through an owner filter; project and run queries go through the one permission check of section 4 (owner, or shared with the caller). Add tests where user B tries to read, change, sync and test user A's resources, and where viewers and editors try what their role doesn't allow.
+- **Passwords:** Argon2id hashing, at least 10 characters, and login rate limits (5 attempts a minute per IP and per email, counted in Redis; if Redis is down, logins are not blocked).
+- **Tokens:** JWT access tokens signed with HS256 using `TT_JWT_SECRET`. Refresh tokens are httpOnly and SameSite=Strict cookies (Secure when `TT_PUBLIC_URL` is https), stored hashed, and rotated each time they are used. Reusing a rotated token signs the user out everywhere, except within a 30-second grace period (two tabs refreshing at once).
+- **Accounts turned off** by an admin are signed out everywhere at once, and their scheduled syncs stop.
 - **SSRF guard:** repo and Azure URLs must be `https://`. Block private, loopback and link-local addresses unless `TT_ALLOW_PRIVATE_HOSTS=true` (needed for self-hosted Git on the LAN).
 - **Containers:** run as a non-root user, mount the filesystem read-only except `/data`, and add healthchecks.
-- **Web:** strict CORS (same origin via the Nginx proxy), security headers (CSP, HSTS when served over TLS), and CSRF protection on the refresh endpoint.
+- **Web:** strict CORS (same origin via the Nginx proxy), security headers (CSP, HSTS when served over TLS), and CSRF protection on the refresh and logout endpoints (a required `X-Requested-With: TicketTrail` header).
 - **Least privilege guidance:** the UI tells users which minimum scopes their PATs need: *Code (Read)* for Git and *Work Items (Read & Write)* for Azure.
 
 ## 11. Repository layout and configuration
@@ -278,37 +330,45 @@ Everything lives in one monorepo, with the backend and frontend as separate Dock
 tickettrail/
 ├── docker-compose.yml          # production-like stack
 ├── docker-compose.dev.yml      # hot reload, exposed ports
+├── docker-compose.e2e.yml      # adds a fake Git / Azure DevOps server for the Playwright test
 ├── .env.example
 ├── README.md
+├── .github/workflows/ci.yml    # lint, types, tests, image build, e2e, secret-leak check
+├── scripts/secret-leak-check.sh
 ├── backend/
 │   ├── Dockerfile
 │   ├── pyproject.toml
+│   ├── manage.py               # rotate-keys
 │   ├── alembic/
 │   └── app/
 │       ├── main.py             # FastAPI app factory
 │       ├── config.py           # pydantic-settings, TT_* env vars
-│       ├── db/                 # models, session, repositories (owner-scoped)
-│       ├── api/v1/             # routers: auth, me, git, azure, projects, runs, admin
-│       ├── core/               # security, crypto, logging, errors
+│       ├── db/                 # models, session, repositories (owner-scoped, access rules, transfers)
+│       ├── api/access.py       # the project / run permission check
+│       ├── api/v1/             # routers: auth, me, git, azure, projects, sharing, runs, admin
+│       ├── core/               # security, crypto, logging, errors, cron, rate limits
 │       ├── integrations/
 │       │   ├── git/            # GitClient, host detection, URL builders
 │       │   └── trackers/       # WorkItemTracker interface, AzureBoardsClient
 │       ├── sync/               # parser, template renderer, engine, locks
-│       └── worker/             # celery app, tasks, beat schedule loader
-│   └── tests/                  # unit/, integration/, fixtures/ (sample repos)
+│       └── worker/             # celery app, tasks, schedule dispatcher
+│   └── tests/                  # unit/, integration/, fixtures/ (sample repos, fake Azure)
 └── frontend/
     ├── Dockerfile              # build stage + nginx stage
     ├── nginx.conf
-    └── src/                    # pages/, components/, api/, hooks/, schemas/
+    ├── e2e/                    # Playwright test and its fixtures server
+    └── src/                    # pages/, components/, api/, hooks/, lib/, schemas/
 ```
 
 **Environment variables** (all prefixed `TT_`, documented in `.env.example`)
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `TT_DATABASE_URL` | `postgresql+psycopg://tt:tt@db:5432/tickettrail` | Database connection |
+| `TT_DATABASE_URL` | `postgresql+psycopg://tt:tt@db:5432/tickettrail` | Database connection. Compose builds it from `TT_DB_PASSWORD` |
+| `TT_DB_PASSWORD` | `tt` | Compose only: the Postgres password. Change it on first start |
 | `TT_REDIS_URL` | `redis://redis:6379/0` | Broker and locks |
 | `TT_ENCRYPTION_KEY` | *(required)* | Fernet key for secrets |
+| `TT_ENCRYPTION_KEY_OLD` | *(empty)* | The previous key during a key rotation |
 | `TT_JWT_SECRET` | *(required)* | Signs JWTs |
 | `TT_ALLOW_REGISTRATION` | `true` | Public sign-up on or off |
 | `TT_ALLOW_PRIVATE_HOSTS` | `false` | SSRF guard exception |
@@ -317,8 +377,9 @@ tickettrail/
 | `TT_AZURE_MAX_CONCURRENCY` | `5` | Concurrent requests per Azure organization |
 | `TT_LOG_LEVEL` | `INFO` | Logging level; logs are JSON |
 | `TT_PUBLIC_URL` | `http://localhost:8080` | Used in links and cookies |
+| `TT_HTTP_PORT` | `8080` | Compose only: the host port the frontend publishes |
 
-Volumes: `pg_data` (database) and `repos_data` (Git mirrors). Only `frontend` publishes a port (8080 by default). TLS is expected from a reverse proxy in front of the stack.
+Volumes: `pg_data` (database) and `repos_data` (Git clones). Only `frontend` publishes a port (8080 by default). TLS is expected from a reverse proxy in front of the stack.
 
 ## 12. Milestones
 
@@ -353,7 +414,7 @@ Volumes: `pg_data` (database) and `repos_data` (Git mirrors). Only `frontend` pu
 **M4 – Git ingestion engine and dry run**
 
 - *Build:*
-  - `GitClient` (mirror clone and fetch, commit listing, cursors, force-push fallback).
+  - `GitClient` (bare clone and fetch, commit listing, cursors, force-push fallback).
   - The ticket parser with the regex timeout.
   - `sync_runs` and `sync_run_items`, the Celery worker, and `POST /sync` with `dry_run=true`.
   - The project detail page with run history and the item list.
@@ -378,7 +439,7 @@ Volumes: `pg_data` (database) and `repos_data` (Git mirrors). Only `frontend` pu
 **M6 – Scheduling and orchestration polish**
 
 - *Build:*
-  - The database-backed beat scheduler, schedule switch, time-zone handling and minimum interval.
+  - The schedule dispatcher (Celery Beat, schedules read from the database), schedule switch, time-zone handling and minimum interval.
   - The per-project Redis lock, cancel endpoint and dashboard cards with the next run time.
   - Live polling of runs in progress.
 - *Accept when:*
@@ -399,6 +460,23 @@ Volumes: `pg_data` (database) and `repos_data` (Git mirrors). Only `frontend` pu
   - CI is green.
   - Following the README alone, a person deploys a fresh instance and completes a real sync.
   - A secret-leak test (search logs and the database for plaintext tokens) finds nothing.
+
+**M8 – Sharing** (added after M7, built in two phases with a gate after each)
+
+- **S1 – Sharing with users and administrator transfers** *(done)*
+  - *Build:*
+    - `project_shares`, the access rules of section 4 in one permission check, and `triggered_by_id` on runs.
+    - Share endpoints (by exact email; change role; remove; leave) and the `scope` filter on `/projects`.
+    - Admin: list every project, transfer one project or everything a user owns, and the transfer history (`ownership_transfers`).
+    - UI: Share drawer, **Shared with me**, role badges, buttons that follow the role, locked connections for editors, Admin → Projects, **Transfer all**.
+  - *Accept when:*
+    - A viewer sees the project and starts dry runs, and gets 403 on everything else; an editor syncs and edits but can't change connections, share or delete.
+    - A user the project isn't shared with gets 404 on every project and run endpoint.
+    - A transfer keeps secrets encrypted, copies connections the previous owner still uses, and is recorded.
+    - The Playwright test covers sharing with a viewer.
+- **S2 – Organizations** *(next; scope confirmed at its gate)*
+  - Any user can create an organization and add members. Organizations can own projects and connections, and a project can be moved into an organization.
+- Out of scope: instance-wide visibility and public links.
 
 ## 13. Testing and definition of done
 
@@ -423,7 +501,8 @@ A milestone is done only when its acceptance criteria are met, its tests pass in
   - a force-pushed branch
   - each case asserts exactly one comment per pair
 - **Isolation suite:** for every endpoint, check that a second user gets 404 on the first user's resources.
-- **End to end (Playwright):** register → create both connections → create a project → dry run → real sync (Azure mocked) → see the history.
+- **Access suite:** for each role, check what it may and may not do (section 4), plus the share endpoints and the administrator's transfers.
+- **End to end (Playwright):** register → create both connections → create a project → dry run → real sync (Azure mocked) → see the history → share the project with a viewer, who sees it under **Shared with me**, starts a dry run and can't sync.
 
 **Quality bar**
 
@@ -431,3 +510,22 @@ A milestone is done only when its acceptance criteria are met, its tests pass in
 - Frontend: `eslint` + `tsc --noEmit`, with no `any` in the API layer.
 - Every endpoint has typed Pydantic schemas and appears correctly in OpenAPI.
 - No `TODO` left without an issue reference in the final milestone.
+
+## 14. Changes agreed during the build
+
+Decisions taken at the milestone gates, already reflected in the sections above.
+
+| Milestone | Change | Why |
+| --- | --- | --- |
+| M2 | Refresh cookies get the Secure flag only when `TT_PUBLIC_URL` is https | Plain-HTTP local installs could not log in otherwise |
+| M2 | Reusing a rotated refresh token signs the user out everywhere, with a 30-second grace period | Detects stolen tokens without breaking two tabs refreshing at once |
+| M3 | Connection tests run in the worker; `POST /projects/test-pattern` added | The API never talks to Git or Azure; patterns can be tried before saving |
+| M4 | Bare, blobless clone of branches instead of `git clone --mirror` | A mirror also fetches `refs/pull/*`, gigabytes on busy GitHub repos |
+| M4 | `sync_run_items` gained `position`, `commit_subject` and `branch` | Stable ordering and a readable item list |
+| M5 | A 404 on the Azure existence check fails the run | Otherwise a wrong organization or project would skip every commit for good |
+| M5 | Stalled runs are closed after 10 minutes without a heartbeat (anticipated from M6) | A crashed worker can't block a project |
+| M6 | A minute dispatcher on plain Celery Beat instead of a database-backed beat library | Fewer moving parts; schedules still change at runtime |
+| M6 | New run status `cancelled` | A cancelled run is neither a success nor a failure |
+| M6 | Runs can be deleted (one, or all dry runs) | Keeps the history readable; never re-posts a comment |
+| M7 | `TT_DB_PASSWORD` (default `tt`) and a "First start" section in the README | Defaults that work out of the box, changed on first start |
+| M8/S1 | Project sharing (viewer / editor), administrator transfers | Projects survive a colleague leaving; teams can work on the same project |
