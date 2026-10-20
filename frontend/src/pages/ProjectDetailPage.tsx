@@ -13,19 +13,24 @@ import {
   Text,
   Title,
 } from '@mantine/core';
+import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { errorMessage } from '../api/errors';
 import type { SyncRun } from '../api/types';
 import { confirmDelete } from '../components/confirmDelete';
+import { RoleBadge, SharingLine } from '../components/ProjectAccess';
 import { RunStatusBadge } from '../components/RunStatusBadge';
+import { ShareDrawer } from '../components/ShareDrawer';
 import { SyncNowButton } from '../components/SyncNowButton';
 import { useAuth } from '../hooks/useAuth';
 import { useDryRun } from '../hooks/useDryRun';
 import { useClearDryRuns, useDeleteRun, useRuns } from '../hooks/useRuns';
-import { useAzureConnections, useGitConnections, useProject } from '../hooks/useSettings';
+import { useProject } from '../hooks/useSettings';
+import { useRemoveShare } from '../hooks/useSharing';
+import { canEdit, canManageRun, isOwner } from '../lib/access';
 import { formatDateTime, isRunActive, runDuration } from '../lib/runs';
 import { formatRunTime } from '../lib/schedule';
 
@@ -35,14 +40,15 @@ export function ProjectDetailPage() {
   const { projectId = '' } = useParams();
   const { user } = useAuth();
   const timeZone = user?.timezone ?? 'UTC';
+  const navigate = useNavigate();
   const project = useProject(projectId);
-  const git = useGitConnections();
-  const azure = useAzureConnections();
   const [page, setPage] = useState(1);
+  const [sharing, setSharing] = useState(false);
   const runs = useRuns(projectId, page);
   const dryRun = useDryRun(projectId);
   const deleteRun = useDeleteRun(projectId);
   const clearDryRuns = useClearDryRuns(projectId);
+  const leave = useRemoveShare(projectId);
 
   if (project.isPending) {
     return (
@@ -59,8 +65,9 @@ export function ProjectDetailPage() {
     );
   }
 
-  const gitConnection = git.data?.items.find((c) => c.id === project.data.git_connection_id);
-  const azureConnection = azure.data?.items.find((c) => c.id === project.data.azure_connection_id);
+  const gitConnection = project.data.git_connection;
+  const azureConnection = project.data.azure_connection;
+  const editable = canEdit(project.data);
 
   const onDeleteRun = (run: SyncRun) =>
     confirmDelete({
@@ -89,13 +96,36 @@ export function ProjectDetailPage() {
         }),
     });
 
+  const onLeave = () =>
+    modals.openConfirmModal({
+      title: 'Leave this project?',
+      children: (
+        <Text size="sm">
+          You lose access to "{project.data.name}" and its runs, until{' '}
+          {project.data.owner?.display_name ?? 'the owner'} shares it with you again.
+        </Text>
+      ),
+      labels: { confirm: 'Leave', cancel: 'Cancel' },
+      confirmProps: { color: 'red' },
+      onConfirm: () => {
+        if (!user) return;
+        leave.mutate(user.id, {
+          onSuccess: () => navigate('/'),
+          onError: (error) => notifications.show({ color: 'red', message: errorMessage(error) }),
+        });
+      },
+    });
+
   const totalPages = runs.data ? Math.max(1, Math.ceil(runs.data.total / PAGE_SIZE)) : 1;
 
   return (
     <Stack maw={1100}>
       <Group justify="space-between" align="flex-start">
         <div>
-          <Title order={2}>{project.data.name}</Title>
+          <Group gap="xs">
+            <Title order={2}>{project.data.name}</Title>
+            <RoleBadge project={project.data} />
+          </Group>
           <Text size="sm" c="dimmed">
             {gitConnection?.name ?? '…'}
             {' · '}
@@ -103,27 +133,42 @@ export function ProjectDetailPage() {
             {' → '}
             {azureConnection ? `${azureConnection.name} (${azureConnection.azure_project})` : '…'}
           </Text>
+          <SharingLine project={project.data} />
         </div>
         <Group gap="sm">
-          <Button variant="default" component={Link} to={`/settings/projects/${projectId}`}>
-            Settings
-          </Button>
+          {isOwner(project.data) ? (
+            <Button variant="default" onClick={() => setSharing(true)}>
+              Share
+            </Button>
+          ) : (
+            <Button variant="subtle" color="red" onClick={onLeave}>
+              Leave
+            </Button>
+          )}
+          {editable && (
+            <Button variant="default" component={Link} to={`/settings/projects/${projectId}`}>
+              Settings
+            </Button>
+          )}
           <Button variant="default" onClick={dryRun.start} loading={dryRun.pending}>
             Dry run
           </Button>
-          <SyncNowButton project={project.data} onDryRun={dryRun.start} />
+          {editable && <SyncNowButton project={project.data} onDryRun={dryRun.start} />}
         </Group>
       </Group>
+      {isOwner(project.data) && (
+        <ShareDrawer project={project.data} opened={sharing} onClose={() => setSharing(false)} />
+      )}
       <Text size="sm" c="dimmed">
         A dry run lists which comments would be posted, without changing anything in Azure DevOps.
-        Sync now posts them.
+        {editable ? ' Sync now posts them.' : ' Only an editor can post them.'}
         {project.data.next_run_at &&
           ` Next scheduled run: ${formatRunTime(new Date(project.data.next_run_at), timeZone)}.`}
       </Text>
 
       <Group justify="space-between">
         <Title order={4}>Run history</Title>
-        {runs.data?.items.some((run) => run.dry_run && !isRunActive(run)) && (
+        {editable && runs.data?.items.some((run) => run.dry_run && !isRunActive(run)) && (
           <Button size="xs" variant="subtle" color="red" onClick={onClearDryRuns} loading={clearDryRuns.isPending}>
             Clear dry runs
           </Button>
@@ -177,13 +222,18 @@ export function ProjectDetailPage() {
                           </Badge>
                         )}
                       </Group>
+                      {run.triggered_by && (
+                        <Text size="xs" c="dimmed">
+                          by {run.triggered_by.display_name}
+                        </Text>
+                      )}
                     </Table.Td>
                     <Table.Td ta="right">{run.commits_scanned}</Table.Td>
                     <Table.Td ta="right">{run.comments_posted}</Table.Td>
                     <Table.Td ta="right">{run.errors}</Table.Td>
                     <Table.Td>{runDuration(run) ?? '—'}</Table.Td>
                     <Table.Td>
-                      {!isRunActive(run) && (
+                      {!isRunActive(run) && canManageRun(project.data, run, user?.id) && (
                         <Button
                           size="compact-xs"
                           variant="subtle"

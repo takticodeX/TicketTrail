@@ -3,13 +3,14 @@
 import re
 import uuid
 from datetime import date, datetime
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
-from app.api.v1.schemas.common import Name
+from app.api.v1.schemas.common import Name, UserSummary
 from app.api.v1.schemas.runs import RunResponse
 from app.core.cron import InvalidCronError, validate_cron
+from app.integrations.git.hosts import GitHost
 from app.sync.parser import (
     DEFAULT_TICKET_PATTERN,
     InvalidPatternError,
@@ -130,6 +131,28 @@ class ProjectUpdate(BaseModel):
     dry_run_default: bool | None = None
 
 
+class ProjectGitSummary(BaseModel):
+    """What everyone with access sees of the project's Git connection: never its secret."""
+
+    id: uuid.UUID
+    name: str
+    repo_url: str
+    host: GitHost
+    commit_url_pattern: str
+
+
+class ProjectAzureSummary(BaseModel):
+    """What everyone with access sees of the project's Azure connection: never its PAT."""
+
+    id: uuid.UUID
+    name: str
+    organization_url: str
+    azure_project: str
+
+
+ProjectRoleName = Literal["owner", "editor", "viewer"]
+
+
 class ProjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -153,6 +176,15 @@ class ProjectResponse(BaseModel):
         default=None, description="Next scheduled run (UTC), if the schedule is on"
     )
     comments_posted: int = Field(default=0, description="Comments posted for this project so far")
+    # Sharing.
+    role: ProjectRoleName = Field(default="owner", description="Your role on this project")
+    owner: UserSummary | None = None
+    schedule_timezone: str = Field(
+        default="UTC", description="The owner's time zone, which the schedule runs in"
+    )
+    shares: int = Field(default=0, description="Number of users the project is shared with")
+    git_connection: ProjectGitSummary | None = None
+    azure_connection: ProjectAzureSummary | None = None
 
 
 class PatternTestRequest(BaseModel):

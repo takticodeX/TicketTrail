@@ -28,7 +28,7 @@ describe('AdminUsersPage', () => {
     renderWithProviders(<AdminUsersPage />);
     const table = await screen.findByRole('table', { name: 'Users' });
     expect(within(table).getByText('bob@example.com')).toBeInTheDocument();
-    expect(within(table).getAllByRole('button')).toHaveLength(1);
+    expect(within(table).getAllByRole('button', { name: /^Turn (on|off)/ })).toHaveLength(1);
     expect(within(table).getByRole('button', { name: 'Turn off bob@example.com' })).toBeInTheDocument();
   });
 

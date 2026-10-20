@@ -3,9 +3,10 @@ from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, UniqueConstraint, false
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import TimestampedModel
+from app.db.models.user import User
 
 
 class RunTrigger(StrEnum):
@@ -63,6 +64,11 @@ class SyncRun(TimestampedModel):
     error_message: Mapped[str | None] = mapped_column(Text)
     # Set by POST /runs/{id}/cancel; the worker checks it between commits.
     cancel_requested: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # Who started a manual run; null for scheduled runs (and runs from before sharing).
+    triggered_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    triggered_by: Mapped[User | None] = relationship(lazy="selectin")
 
 
 class SyncRunItem(TimestampedModel):

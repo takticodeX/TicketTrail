@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AzureConnection, GitConnection, Project, SyncRun, SyncRunDetail, SyncRunItem } from '../api/types';
 import { useAuth } from '../hooks/useAuth';
-import { authValue, errorResponse, jsonResponse, mockFetch, renderWithProviders } from '../test/utils';
+import { OWN_PROJECT, authValue, errorResponse, jsonResponse, mockFetch, renderWithProviders } from '../test/utils';
 import { ProjectDetailPage } from './ProjectDetailPage';
 import { RunDetailPage } from './RunDetailPage';
 
@@ -14,13 +14,6 @@ beforeEach(() => vi.mocked(useAuth).mockReturnValue(authValue()));
 
 afterEach(() => vi.unstubAllGlobals());
 
-const project = {
-  id: 'p1',
-  name: 'Web app',
-  git_connection_id: 'g1',
-  azure_connection_id: 'a1',
-  branches: [],
-} as unknown as Project;
 const git = {
   id: 'g1',
   name: 'App repo',
@@ -32,6 +25,17 @@ const azure = {
   organization_url: 'https://dev.azure.com/acme',
   azure_project: 'Web App',
 } as AzureConnection;
+
+const project = {
+  id: 'p1',
+  name: 'Web app',
+  git_connection_id: 'g1',
+  azure_connection_id: 'a1',
+  branches: [],
+  ...OWN_PROJECT,
+  git_connection: git,
+  azure_connection: azure,
+} as unknown as Project;
 
 const run: SyncRunDetail = {
   id: 'r1',

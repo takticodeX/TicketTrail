@@ -2,7 +2,8 @@ import { expect, request, test, type Page } from '@playwright/test';
 
 /**
  * The main path (spec section 13): register -> create both connections -> create a
- * project -> dry run -> real sync (Azure faked by the fixtures server) -> history.
+ * project -> dry run -> real sync (Azure faked by the fixtures server) -> history,
+ * then sharing the project with a viewer.
  */
 
 const FIXTURES = process.env.E2E_FIXTURES_URL ?? 'https://127.0.0.1:8443';
@@ -12,6 +13,7 @@ const ORG_URL = 'https://fixtures:8443/acme';
 const AZURE_PAT = 'e2e-azure-pat-canary';
 
 const email = `e2e-${Date.now()}@example.com`;
+const viewerEmail = `e2e-viewer-${Date.now()}@example.com`;
 const password = 'e2e-password-123';
 
 async function pick(page: Page, label: string, option: string) {
@@ -109,5 +111,36 @@ test('register, connect, dry run, sync and see the history', async ({ page }) =>
   await expect(page.getByText('Success', { exact: true })).toBeVisible();
   const again = (await (await fixtures.get('/__fake__/comments')).json()) as Record<string, unknown[]>;
   expect(Object.values(again).map((c) => c.length)).toEqual([1, 1, 1]);
+
+  // Share the project with a second user, as a viewer.
+  const api = await request.newContext({ baseURL: test.info().project.use.baseURL });
+  const registered = await api.post('/api/v1/auth/register', {
+    data: { email: viewerEmail, password, display_name: 'Victor' },
+  });
+  expect(registered.status()).toBe(201);
+  await api.dispose();
+  await page.getByRole('link', { name: /Demo/ }).first().click();
+  await page.getByRole('button', { name: 'Share' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Share "Demo"' });
+  await drawer.getByRole('textbox', { name: 'Email' }).fill(viewerEmail);
+  await drawer.getByRole('button', { name: 'Share' }).click();
+  await expect(drawer.getByRole('table', { name: 'Shared with' }).getByText(viewerEmail)).toBeVisible();
+
+  // The viewer sees it under "Shared with me", can dry run, can't sync.
+  await page.context().clearCookies();
+  await page.goto('/login');
+  await page.getByLabel('Email', { exact: true }).fill(viewerEmail);
+  await page.getByLabel('Password', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Log in' }).click();
+  await expect(page.getByRole('heading', { name: 'Shared with me' })).toBeVisible();
+  const card = page.getByLabel('Demo', { exact: true });
+  await expect(card.getByText('Viewer')).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Sync now' })).toHaveCount(0);
+  await card.getByRole('button', { name: 'Dry run' }).click();
+  await expect(page.getByRole('heading', { name: 'Dry run' })).toBeVisible();
+  await expect(page.getByText('Success', { exact: true })).toBeVisible();
+  await expect(page.getByText(/by Victor/)).toBeVisible();
+  const afterViewer = (await (await fixtures.get('/__fake__/comments')).json()) as Record<string, unknown[]>;
+  expect(Object.values(afterViewer).map((c) => c.length)).toEqual([1, 1, 1]);
   await fixtures.dispose();
 });

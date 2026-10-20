@@ -11,6 +11,7 @@ from app.api.v1 import (
     me,
     projects,
     runs,
+    sharing,
 )
 from app.core.errors import ErrorResponse
 
@@ -46,6 +47,13 @@ api_router.include_router(git_connections.router, responses=_CONNECTION_ERRORS)
 api_router.include_router(azure_connections.router, responses=_CONNECTION_ERRORS)
 api_router.include_router(projects.router, responses=_RESOURCE_ERRORS)
 api_router.include_router(
+    sharing.router,
+    responses={
+        **_RESOURCE_ERRORS,
+        403: {"model": ErrorResponse, "description": "Only the project's owner can do this"},
+    },
+)
+api_router.include_router(
     admin.router,
     responses={
         **_RESOURCE_ERRORS,
@@ -56,6 +64,7 @@ api_router.include_router(
     runs.router,
     responses={
         **_RESOURCE_ERRORS,
+        403: {"model": ErrorResponse, "description": "Your role on the project is too weak"},
         503: {"model": ErrorResponse, "description": "The task queue is unavailable"},
     },
 )

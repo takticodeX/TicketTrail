@@ -50,7 +50,7 @@ const SAMPLE_SHA = '3f9a1c27b4e85d60a1b2c3d4e5f60718293a4b5c';
 
 /** Sample values for the template preview, using the project's own settings where possible. */
 export function sampleCommit(
-  connection: GitConnection | undefined,
+  connection: Pick<GitConnection, 'repo_url' | 'commit_url_pattern'> | null | undefined,
   branch: string,
   samples: string,
 ): TemplateValues {

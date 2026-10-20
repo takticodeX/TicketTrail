@@ -71,11 +71,27 @@ export function ProjectWizardPage() {
       </Alert>
     );
   }
+  if (project.data?.role === 'viewer') {
+    return (
+      <Alert color="gray" variant="light" title={project.data.name}>
+        <Text size="sm">
+          Only an editor can change this project's settings. Ask {project.data.owner?.display_name ?? 'the owner'}{' '}
+          for editor access.
+        </Text>
+        <Anchor component={Link} to={`/projects/${project.data.id}`} size="sm">
+          Back to the project
+        </Anchor>
+      </Alert>
+    );
+  }
   return <ProjectWizard key={projectId ?? 'new'} project={project.data} />;
 }
 
 function ProjectWizard({ project }: { project: Project | undefined }) {
   const editing = project !== undefined;
+  // An editor changes everything but the connections, which belong to the owner.
+  const ownsConnections = !editing || project.role === 'owner';
+  const ownerName = project?.owner?.display_name ?? 'the owner';
   const navigate = useNavigate();
   const { user } = useAuth();
   const gitConnections = useGitConnections();
@@ -105,7 +121,7 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
   const branches = watch('branches');
   const startMode = watch('start_mode');
   const pattern = watch('ticket_pattern');
-  const gitConnection = gitConnections.data?.items.find((c) => c.id === gitId);
+  const gitConnection = gitConnections.data?.items.find((c) => c.id === gitId) ?? project?.git_connection;
   const previewBranch = branches[0] ?? branchResult?.default_branch ?? 'main';
   const sample = useMemo(
     () => sampleCommit(gitConnection, previewBranch, samples),
@@ -144,11 +160,12 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
     }
   };
 
-  const gitOptions = (gitConnections.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }));
-  const azureOptions = (azureConnections.data?.items ?? []).map((c) => ({
-    value: c.id,
-    label: `${c.name} (${c.azure_project})`,
-  }));
+  // An editor can't list the owner's connections: offer only the project's own.
+  const gitChoices = ownsConnections ? (gitConnections.data?.items ?? []) : [project?.git_connection];
+  const azureChoices = ownsConnections ? (azureConnections.data?.items ?? []) : [project?.azure_connection];
+  const gitOptions = gitChoices.flatMap((c) => (c ? [{ value: c.id, label: c.name }] : []));
+  const azureOptions = azureChoices.flatMap((c) => (c ? [{ value: c.id, label: `${c.name} (${c.azure_project})` }] : []));
+  const lockedHint = ownsConnections ? undefined : `Only ${ownerName} can change the connection.`;
   const isLast = active === STEPS.length - 1;
 
   return (
@@ -184,6 +201,8 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
                       <Select
                         label="Git connection"
                         placeholder="Pick a repository"
+                        disabled={!ownsConnections}
+                        description={lockedHint}
                         data={gitOptions}
                         value={field.value || null}
                         onChange={(value) => {
@@ -195,7 +214,7 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
                       />
                     )}
                   />
-                  {gitConnections.data?.items.length === 0 && (
+                  {ownsConnections && gitConnections.data?.items.length === 0 && (
                     <Text size="sm">
                       No Git connections yet.{' '}
                       <Anchor component={Link} to="/settings/git">
@@ -210,10 +229,21 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
               <Stepper.Step label="Branches">
                 <Stack pt="md">
                   <Group align="flex-end">
-                    <Button variant="default" onClick={() => void onLoadBranches()} loading={loadBranches.isPending} disabled={!gitId}>
+                    <Button
+                      variant="default"
+                      onClick={() => void onLoadBranches()}
+                      loading={loadBranches.isPending}
+                      disabled={!gitId || !ownsConnections}
+                    >
                       Load branches from the repository
                     </Button>
                   </Group>
+                  {!ownsConnections && (
+                    <Text size="xs" c="dimmed">
+                      Loading branches uses {ownerName}'s Git connection, so only they can do it. Type the branch
+                      names instead.
+                    </Text>
+                  )}
                   {branchResult && <GitTestResultView result={branchResult} />}
                   <Controller
                     control={control}
@@ -245,6 +275,8 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
                       <Select
                         label="Azure connection"
                         placeholder="Pick a board"
+                        disabled={!ownsConnections}
+                        description={lockedHint}
                         data={azureOptions}
                         value={field.value || null}
                         onChange={(value) => field.onChange(value ?? '')}
@@ -253,7 +285,7 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
                       />
                     )}
                   />
-                  {azureConnections.data?.items.length === 0 && (
+                  {ownsConnections && azureConnections.data?.items.length === 0 && (
                     <Text size="sm">
                       No Azure connections yet.{' '}
                       <Anchor component={Link} to="/settings/azure">
@@ -359,7 +391,7 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
                             enabled={enabled.value}
                             onEnabledChange={enabled.onChange}
                             error={errors.schedule_cron?.message}
-                            timeZone={user?.timezone ?? 'UTC'}
+                            timeZone={project?.schedule_timezone ?? user?.timezone ?? 'UTC'}
                           />
                         )}
                       />

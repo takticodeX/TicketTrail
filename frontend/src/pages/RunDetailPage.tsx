@@ -26,7 +26,9 @@ import type { ItemAction, SyncRunDetail } from '../api/types';
 import { confirmDelete } from '../components/confirmDelete';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { useCancelRun, useDeleteRun, useRun, useRunItems } from '../hooks/useRuns';
-import { useAzureConnections, useGitConnections, useProject } from '../hooks/useSettings';
+import { useAuth } from '../hooks/useAuth';
+import { useProject } from '../hooks/useSettings';
+import { canManageRun } from '../lib/access';
 import {
   ACTION_COLORS,
   ACTION_LABELS,
@@ -73,8 +75,7 @@ export function RunDetailPage() {
   const { projectId = '', runId = '' } = useParams();
   const run = useRun(runId);
   const project = useProject(projectId);
-  const git = useGitConnections();
-  const azure = useAzureConnections();
+  const { user } = useAuth();
   const [action, setAction] = useState<ItemAction | null>(null);
   const [page, setPage] = useState(1);
   const live = run.data ? isRunActive(run.data) : false;
@@ -105,8 +106,9 @@ export function RunDetailPage() {
     );
   }
 
-  const gitConnection = git.data?.items.find((c) => c.id === project.data?.git_connection_id);
-  const azureConnection = azure.data?.items.find((c) => c.id === project.data?.azure_connection_id);
+  const gitConnection = project.data?.git_connection;
+  const azureConnection = project.data?.azure_connection;
+  const manageable = project.data ? canManageRun(project.data, run.data, user?.id) : false;
   const totalPages = items.data ? Math.max(1, Math.ceil(items.data.total / PAGE_SIZE)) : 1;
   const failed = run.data.status === 'failed';
   const cancelled = run.data.status === 'cancelled';
@@ -157,7 +159,7 @@ export function RunDetailPage() {
             <Title order={2}>{run.data.dry_run ? 'Dry run' : 'Sync'}</Title>
             <RunStatusBadge status={run.data.status} />
           </Group>
-          {!live && (
+          {!live && manageable && (
             <Button size="xs" variant="subtle" color="red" onClick={onDelete} loading={remove.isPending}>
               Delete run
             </Button>
@@ -166,6 +168,7 @@ export function RunDetailPage() {
         <Text size="sm" c="dimmed">
           Started {formatDateTime(run.data.started_at ?? run.data.created_at)}
           {runDuration(run.data) && ` · took ${runDuration(run.data)}`}
+          {run.data.triggered_by && ` · by ${run.data.triggered_by.display_name}`}
         </Text>
       </div>
 
@@ -177,7 +180,7 @@ export function RunDetailPage() {
                 ? 'Cancelling: the run stops after the current commit.'
                 : 'This page updates by itself.'}
             </Text>
-            {!run.data.cancel_requested && (
+            {!run.data.cancel_requested && manageable && (
               <Button size="xs" variant="light" color="red" onClick={onCancel} loading={cancel.isPending}>
                 Cancel
               </Button>

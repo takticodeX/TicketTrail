@@ -5,6 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.v1.schemas.common import UserSummary
 from app.db.models import ItemAction, RunStatus, RunTrigger
 
 
@@ -41,6 +42,9 @@ class RunResponse(BaseModel):
     errors: int
     error_message: str | None
     cancel_requested: bool
+    triggered_by: UserSummary | None = Field(
+        default=None, description="Who started a manual run; null for scheduled runs"
+    )
 
 
 class RunDetailResponse(RunResponse):

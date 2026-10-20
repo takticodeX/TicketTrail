@@ -15,11 +15,13 @@ import { Link } from 'react-router-dom';
 
 import { errorMessage } from '../api/errors';
 import type { Project } from '../api/types';
+import { RoleBadge, SharingLine } from '../components/ProjectAccess';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { SyncNowButton } from '../components/SyncNowButton';
 import { useAuth } from '../hooks/useAuth';
 import { useDryRun } from '../hooks/useDryRun';
 import { useProjects } from '../hooks/useSettings';
+import { canEdit } from '../lib/access';
 import { formatDateTime } from '../lib/runs';
 import { formatRunTime } from '../lib/schedule';
 
@@ -35,8 +37,12 @@ function ProjectCard({ project, timeZone }: { project: Project; timeZone: string
           <Anchor component={Link} to={`/projects/${project.id}`} fw={600} size="lg" lineClamp={1}>
             {project.name}
           </Anchor>
-          {last && <RunStatusBadge status={last.status} />}
+          <Group gap={6} wrap="nowrap">
+            <RoleBadge project={project} />
+            {last && <RunStatusBadge status={last.status} />}
+          </Group>
         </Group>
+        <SharingLine project={project} size="xs" mt={-8} />
         <Stack gap={2}>
           <Text size="sm">
             {last ? (
@@ -70,10 +76,20 @@ function ProjectCard({ project, timeZone }: { project: Project; timeZone: string
           <Button size="xs" variant="default" onClick={dryRun.start} loading={dryRun.pending}>
             Dry run
           </Button>
-          <SyncNowButton project={project} onDryRun={dryRun.start} size="xs" />
+          {canEdit(project) && <SyncNowButton project={project} onDryRun={dryRun.start} size="xs" />}
         </Group>
       </Stack>
     </Card>
+  );
+}
+
+function ProjectGrid({ projects, timeZone }: { projects: Project[]; timeZone: string }) {
+  return (
+    <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
+      {projects.map((project) => (
+        <ProjectCard key={project.id} project={project} timeZone={timeZone} />
+      ))}
+    </SimpleGrid>
   );
 }
 
@@ -82,6 +98,9 @@ export function DashboardPage() {
   const { user } = useAuth();
   const projects = useProjects();
   const timeZone = user?.timezone ?? 'UTC';
+  const all = projects.data?.items ?? [];
+  const own = all.filter((p) => p.role === 'owner');
+  const shared = all.filter((p) => p.role !== 'owner');
 
   return (
     <Stack maw={1100}>
@@ -96,10 +115,10 @@ export function DashboardPage() {
           {errorMessage(projects.error)}
         </Alert>
       )}
-      {projects.data && projects.data.items.length === 0 && (
+      {projects.data && own.length === 0 && (
         <Card withBorder p="xl" radius="md">
           <Stack gap="xs" align="center" ta="center">
-            <Text fw={600}>No projects yet</Text>
+            <Text fw={600}>{shared.length > 0 ? 'No projects of your own yet' : 'No projects yet'}</Text>
             <Text c="dimmed" size="sm" maw={460}>
               {user ? `Welcome, ${user.display_name}. ` : ''}A project links a Git repository to an
               Azure DevOps board.
@@ -110,12 +129,14 @@ export function DashboardPage() {
           </Stack>
         </Card>
       )}
-      {projects.data && projects.data.items.length > 0 && (
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
-          {projects.data.items.map((project) => (
-            <ProjectCard key={project.id} project={project} timeZone={timeZone} />
-          ))}
-        </SimpleGrid>
+      {own.length > 0 && <ProjectGrid projects={own} timeZone={timeZone} />}
+      {shared.length > 0 && (
+        <>
+          <Title order={4} mt="md">
+            Shared with me
+          </Title>
+          <ProjectGrid projects={shared} timeZone={timeZone} />
+        </>
       )}
     </Stack>
   );

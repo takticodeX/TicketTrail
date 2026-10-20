@@ -105,6 +105,13 @@ export function AppLayout() {
               active={pathname.startsWith('/admin/users')}
               onClick={close}
             />
+            <NavLink
+              component={Link}
+              to="/admin/projects"
+              label="Projects"
+              active={pathname.startsWith('/admin/projects')}
+              onClick={close}
+            />
           </NavLink>
         )}
       </AppShell.Navbar>

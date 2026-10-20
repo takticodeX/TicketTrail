@@ -1,5 +1,11 @@
 """Data access. Repositories for user-owned tables filter every query on owner_id."""
 
+from app.db.repositories.access import (
+    ProjectAccessRepository,
+    ProjectScope,
+    ProjectShareRepository,
+    accessible_project_ids,
+)
 from app.db.repositories.owned import (
     AzureConnectionRepository,
     GitConnectionRepository,
@@ -23,10 +29,14 @@ __all__ = [
     "GitConnectionRepository",
     "OwnedRepository",
     "PostedCommentRepository",
+    "ProjectAccessRepository",
     "ProjectRepository",
+    "ProjectScope",
+    "ProjectShareRepository",
     "RefreshTokenRepository",
     "SyncRunRepository",
     "UserRepository",
+    "accessible_project_ids",
     "close_stale_runs",
     "other_run_active",
     "project_summaries",

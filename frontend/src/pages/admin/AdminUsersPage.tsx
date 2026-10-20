@@ -1,11 +1,12 @@
-import { Alert, Badge, Button, Center, Loader, Pagination, Paper, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Badge, Button, Center, Group, Loader, Pagination, Paper, Stack, Table, Text, Title } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { listUsers, setUserActive, type AdminUser } from '../../api/admin';
+import { listUsers, setUserActive, transferEverything, type AdminUser } from '../../api/admin';
 import { errorMessage } from '../../api/errors';
+import { TransferModal } from '../../components/TransferModal';
 import { useAuth } from '../../hooks/useAuth';
 import { formatDateTime } from '../../lib/runs';
 
@@ -16,6 +17,7 @@ export function AdminUsersPage() {
   const { user: me } = useAuth();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
+  const [leaving, setLeaving] = useState<AdminUser | null>(null);
   const users = useQuery({
     queryKey: ['admin-users', page],
     queryFn: () => listUsers(page, PAGE_SIZE),
@@ -41,7 +43,7 @@ export function AdminUsersPage() {
         children: (
           <Text size="sm">
             {user.email} is signed out everywhere and can't log in. Their scheduled syncs stop.
-            You can turn the account on again later.
+            You can turn the account on again later, or transfer their projects to someone else.
           </Text>
         ),
         labels: { confirm: 'Turn off', cancel: 'Cancel' },
@@ -107,17 +109,27 @@ export function AdminUsersPage() {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      {user.id !== me?.id && (
+                      <Group gap="xs" justify="flex-end" wrap="nowrap">
                         <Button
                           size="xs"
-                          variant={user.is_active ? 'subtle' : 'light'}
-                          color={user.is_active ? 'red' : 'teal'}
-                          onClick={() => onToggle(user)}
-                          aria-label={`${user.is_active ? 'Turn off' : 'Turn on'} ${user.email}`}
+                          variant="default"
+                          onClick={() => setLeaving(user)}
+                          aria-label={`Transfer everything ${user.email} owns`}
                         >
-                          {user.is_active ? 'Turn off' : 'Turn on'}
+                          Transfer all
                         </Button>
-                      )}
+                        {user.id !== me?.id && (
+                          <Button
+                            size="xs"
+                            variant={user.is_active ? 'subtle' : 'light'}
+                            color={user.is_active ? 'red' : 'teal'}
+                            onClick={() => onToggle(user)}
+                            aria-label={`${user.is_active ? 'Turn off' : 'Turn on'} ${user.email}`}
+                          >
+                            {user.is_active ? 'Turn off' : 'Turn on'}
+                          </Button>
+                        )}
+                      </Group>
                     </Table.Td>
                   </Table.Tr>
                 ))}
@@ -127,6 +139,18 @@ export function AdminUsersPage() {
         </Paper>
       )}
       {totalPages > 1 && <Pagination total={totalPages} value={page} onChange={setPage} />}
+      <TransferModal
+        opened={leaving !== null}
+        onClose={() => setLeaving(null)}
+        title={leaving ? `Transfer everything ${leaving.display_name} owns` : 'Transfer'}
+        explanation={
+          leaving &&
+          `Every project and connection of ${leaving.email} goes to the new owner, with the run history and ` +
+            'the comments already posted. People they shared projects with keep their access.'
+        }
+        excludeUserId={leaving?.id ?? ''}
+        transfer={(toUserId) => transferEverything(leaving?.id ?? '', toUserId)}
+      />
     </Stack>
   );
 }

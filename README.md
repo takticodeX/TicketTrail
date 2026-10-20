@@ -10,6 +10,7 @@ commit twice to the same work item.
 - **Dry run** shows exactly what would be posted, **Sync now** posts it, and projects can
   sync on a schedule.
 - Credentials are entered in the web UI and stored encrypted.
+- Projects can be shared with colleagues as **viewer** or **editor**.
 
 The design is described in [SPEC.md](SPEC.md).
 
@@ -120,8 +121,43 @@ this never causes a comment to be posted again.
 Profile), at most once every 5 minutes by default. Scheduled runs follow the project's
 "Dry run by default" setting. Changes apply within a minute; no restart is needed.
 
-**Administrators** see **Admin → Users**, where accounts can be turned off (which signs
+### Sharing a project
+
+Open a project and click **Share**. Enter the exact email of a registered user and pick a
+role:
+
+| | Viewer | Editor | Owner |
+|---|:---:|:---:|:---:|
+| See the project, its runs and their commits | ✓ | ✓ | ✓ |
+| Start a dry run | ✓ | ✓ | ✓ |
+| Cancel or delete the dry runs they started | ✓ | ✓ | ✓ |
+| Sync now, cancel and delete any run, clear dry runs | | ✓ | ✓ |
+| Change the settings (branches, pattern, template, start point, schedule) | | ✓ | ✓ |
+| Change the Git or Azure connection | | | ✓ |
+| Share, change roles, delete the project | | | ✓ |
+
+Shared projects appear on the Dashboard under **Shared with me**, and anyone can **Leave**
+a project shared with them. Syncs always use the owner's connections: their tokens are
+never shown to anyone, and the schedule runs in the owner's time zone. Manual runs record
+who started them.
+
+### Administrators
+
+The first account is the administrator. **Admin → Users** turns accounts off (which signs
 the user out everywhere and stops their schedules) and on again.
+
+An administrator does not see other users' projects, but **Admin → Projects** lists every
+project and its owner, so nothing is lost when someone leaves:
+
+- **Transfer** gives one project to another user, with the connections it uses. A
+  connection the previous owner still uses in another project is copied instead.
+- **Admin → Users → Transfer all** gives everything a user owns (projects and connections)
+  to another user, for example before turning a leaver's account off.
+
+Tokens move still encrypted, the run history and posted comments come along, and names
+the new owner already uses get a suffix such as "Billing (from Marco)". Every transfer is
+listed under **Transfer history**. To look inside a project, an administrator transfers it
+or asks the owner to share it.
 
 ## 3. Access tokens: minimum scopes per host
 
@@ -255,7 +291,9 @@ To rotate `TT_JWT_SECRET`, change it and restart: everyone has to log in again.
 
 - Tokens, PATs and passwords are encrypted at rest (Fernet) and never returned by the API.
   Passwords are hashed with Argon2id.
-- Every user only sees their own connections, projects and runs.
+- Every user only sees their own connections, and the projects (with their runs) they own
+  or that are shared with them. Other projects answer 404. Shared users never see or use
+  the owner's connections directly.
 - Credentials are passed to Git through the environment, never in URLs, Git config or
   command lines. Logs are JSON and mask Authorization headers, credentials in URLs and
   secret fields.

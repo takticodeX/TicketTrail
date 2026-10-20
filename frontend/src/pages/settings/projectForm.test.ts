@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import type { GitConnection, Project } from '../../api/types';
+import type { GitConnection, Project, ProjectInput } from '../../api/types';
+import { OWN_PROJECT } from '../../test/utils';
 import { sampleCommit, toFormValues, toProjectInput } from './projectForm';
 
-const project: Project = {
-  id: 'p1',
+const input: ProjectInput = {
   name: 'App',
   git_connection_id: 'g1',
   azure_connection_id: 'a1',
@@ -16,13 +16,11 @@ const project: Project = {
   schedule_cron: '0 8 * * 1-5',
   schedule_enabled: true,
   dry_run_default: false,
-  created_at: '',
-  updated_at: '',
 };
+const project: Project = { ...input, ...OWN_PROJECT, id: 'p1', created_at: '', updated_at: '' };
 
 describe('form conversion', () => {
   it('round-trips a project', () => {
-    const { id, created_at, updated_at, ...input } = project;
     expect(toProjectInput(toFormValues(project))).toEqual(input);
   });
 

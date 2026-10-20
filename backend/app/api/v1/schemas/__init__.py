@@ -12,7 +12,7 @@ from app.api.v1.schemas.auth import (
     UserResponse,
     UserUpdateRequest,
 )
-from app.api.v1.schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Page
+from app.api.v1.schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Page, UserSummary
 from app.api.v1.schemas.connections import (
     AzureConnectionCreate,
     AzureConnectionResponse,
@@ -27,7 +27,9 @@ from app.api.v1.schemas.projects import (
     PatternSampleResult,
     PatternTestRequest,
     PatternTestResponse,
+    ProjectAzureSummary,
     ProjectCreate,
+    ProjectGitSummary,
     ProjectResponse,
     ProjectUpdate,
 )
@@ -39,11 +41,22 @@ from app.api.v1.schemas.runs import (
     SyncRequest,
     SyncStarted,
 )
+from app.api.v1.schemas.sharing import (
+    AdminProjectResponse,
+    AdminUserSummary,
+    ShareCreate,
+    ShareResponse,
+    ShareUpdate,
+    TransferRequest,
+    TransferResponse,
+)
 
 __all__ = [
     "DEFAULT_PAGE_SIZE",
     "MAX_PAGE_SIZE",
+    "AdminProjectResponse",
     "AdminUserResponse",
+    "AdminUserSummary",
     "AdminUserUpdate",
     "AuthConfigResponse",
     "AzureConnectionCreate",
@@ -60,7 +73,9 @@ __all__ = [
     "PatternSampleResult",
     "PatternTestRequest",
     "PatternTestResponse",
+    "ProjectAzureSummary",
     "ProjectCreate",
+    "ProjectGitSummary",
     "ProjectResponse",
     "ProjectUpdate",
     "ReadyResponse",
@@ -69,9 +84,15 @@ __all__ = [
     "RunItemResponse",
     "RunResponse",
     "RunsDeleted",
+    "ShareCreate",
+    "ShareResponse",
+    "ShareUpdate",
     "SyncRequest",
     "SyncStarted",
     "TokenResponse",
+    "TransferRequest",
+    "TransferResponse",
     "UserResponse",
+    "UserSummary",
     "UserUpdateRequest",
 ]

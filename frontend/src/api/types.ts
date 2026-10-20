@@ -130,12 +130,52 @@ export interface Project {
   /** Next scheduled run (UTC), when the schedule is on. */
   next_run_at?: string | null;
   comments_posted?: number;
+  // Sharing, computed by the API.
+  /** Your role on this project. */
+  role: ProjectRole;
+  owner: UserSummary | null;
+  /** The owner's time zone: the schedule runs in it. */
+  schedule_timezone: string;
+  /** Number of users the project is shared with. */
+  shares: number;
+  /** The connections without their secrets, so shared users can show them too. */
+  git_connection: ProjectGitSummary | null;
+  azure_connection: ProjectAzureSummary | null;
 }
+
+export type ProjectRole = 'owner' | 'editor' | 'viewer';
+export type ShareRole = Exclude<ProjectRole, 'owner'>;
+
+export interface UserSummary {
+  id: string;
+  display_name: string;
+  email: string;
+}
+
+export type ProjectGitSummary = Pick<GitConnection, 'id' | 'name' | 'repo_url' | 'host' | 'commit_url_pattern'>;
+export type ProjectAzureSummary = Pick<AzureConnection, 'id' | 'name' | 'organization_url' | 'azure_project'>;
 
 export type ProjectInput = Omit<
   Project,
-  'id' | 'created_at' | 'updated_at' | 'last_run' | 'next_run_at' | 'comments_posted'
+  | 'id'
+  | 'created_at'
+  | 'updated_at'
+  | 'last_run'
+  | 'next_run_at'
+  | 'comments_posted'
+  | 'role'
+  | 'owner'
+  | 'schedule_timezone'
+  | 'shares'
+  | 'git_connection'
+  | 'azure_connection'
 >;
+
+export interface ProjectShare {
+  user: UserSummary;
+  role: ShareRole;
+  created_at: string;
+}
 
 export interface PatternTestResponse {
   pattern: string;
@@ -176,6 +216,8 @@ export interface SyncRun {
   error_message: string | null;
   /** The user asked to cancel; a running run stops at the next commit. */
   cancel_requested: boolean;
+  /** Who started a manual run; null for scheduled runs. */
+  triggered_by?: UserSummary | null;
 }
 
 export interface SyncRunDetail extends SyncRun {

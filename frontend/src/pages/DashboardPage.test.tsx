@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Project, SyncRun } from '../api/types';
 import { useAuth } from '../hooks/useAuth';
-import { authValue, jsonResponse, mockFetch, renderWithProviders, testUser } from '../test/utils';
+import { OWN_PROJECT, authValue, jsonResponse, mockFetch, renderWithProviders, testUser } from '../test/utils';
 import { DashboardPage } from './DashboardPage';
 
 vi.mock('../hooks/useAuth', () => ({ useAuth: vi.fn() }));
@@ -27,6 +27,7 @@ const scheduled = {
   last_run: lastRun,
   next_run_at: '2026-10-19T06:00:00Z', // Monday 08:00 in Rome
   comments_posted: 42,
+  ...OWN_PROJECT,
 } as unknown as Project;
 
 const manual = {
@@ -36,6 +37,7 @@ const manual = {
   last_run: null,
   next_run_at: null,
   comments_posted: 1,
+  ...OWN_PROJECT,
 } as unknown as Project;
 
 const projects = (items: Project[]) =>

@@ -1,4 +1,9 @@
-"""Starting syncs and reading their history (spec section 8)."""
+"""Starting syncs and reading their history (spec section 8).
+
+Everyone a project is shared with sees its runs and may start dry runs; real syncs
+and managing the history take an editor. A viewer may cancel or delete the dry
+runs they started themselves.
+"""
 
 import uuid
 from typing import Annotated
@@ -6,6 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Response, status
 from sqlalchemy import delete, func, update
 
+from app.api.access import insufficient_role, need_run_manager, project_for, run_for
 from app.api.deps import CurrentUser, DbSession, PageDep, TaskRunnerDep
 from app.api.v1.git_connections import worker_unavailable
 from app.api.v1.schemas import (
@@ -17,9 +23,16 @@ from app.api.v1.schemas import (
     SyncRequest,
     SyncStarted,
 )
-from app.core.errors import AppError, not_found
-from app.db.models import ACTIVE_STATUSES, ItemAction, RunStatus, RunTrigger, SyncRun
-from app.db.repositories import ProjectRepository, SyncRunRepository
+from app.core.errors import AppError
+from app.db.models import (
+    ACTIVE_STATUSES,
+    ItemAction,
+    ProjectRole,
+    RunStatus,
+    RunTrigger,
+    SyncRun,
+)
+from app.db.repositories import SyncRunRepository
 from app.worker import task_names
 from app.worker.runner import WorkerUnavailableError
 
@@ -35,11 +48,13 @@ def start_sync(
     runner: TaskRunnerDep,
 ) -> SyncStarted:
     """Queue a run and return its ID straight away; the worker does the work."""
-    project = ProjectRepository(db, user.id).get(project_id)
-    if project is None:
-        raise not_found("Project")
+    project, role, _ = project_for(db, user, project_id)
     dry_run = project.dry_run_default if body.dry_run is None else body.dry_run
-    run = SyncRun(project_id=project.id, trigger=RunTrigger.MANUAL, dry_run=dry_run)
+    if not dry_run and not role.at_least(ProjectRole.EDITOR):
+        raise insufficient_role(ProjectRole.EDITOR)
+    run = SyncRun(
+        project_id=project.id, trigger=RunTrigger.MANUAL, dry_run=dry_run, triggered_by_id=user.id
+    )
     db.add(run)
     db.commit()
     try:
@@ -60,8 +75,7 @@ def list_runs(
     project_id: uuid.UUID, user: CurrentUser, db: DbSession, page: PageDep
 ) -> Page[RunResponse]:
     """Newest first."""
-    if ProjectRepository(db, user.id).get(project_id) is None:
-        raise not_found("Project")
+    project_for(db, user, project_id)
     runs, total = SyncRunRepository(db, user.id).list_for_project(
         project_id, offset=page.offset, limit=page.page_size
     )
@@ -73,16 +87,9 @@ def list_runs(
     )
 
 
-def _get_run(db: DbSession, user: CurrentUser, run_id: uuid.UUID) -> SyncRun:
-    run = SyncRunRepository(db, user.id).get(run_id)
-    if run is None:
-        raise not_found("Run")
-    return run
-
-
 @router.get("/runs/{run_id}")
 def get_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> RunDetailResponse:
-    run = _get_run(db, user, run_id)
+    run, _ = run_for(db, user, run_id)
     counts = SyncRunRepository(db, user.id).counts_by_action(run.id)
     return RunDetailResponse.model_validate(
         {**RunResponse.model_validate(run).model_dump(), "counts_by_action": counts}
@@ -96,7 +103,8 @@ def get_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> RunDetailRes
 )
 def cancel_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> RunResponse:
     """Cooperative cancel: a queued run never starts; a running one stops between commits."""
-    run = _get_run(db, user, run_id)
+    run, role = run_for(db, user, run_id)
+    need_run_manager(user, role, run)
     # Conditional updates: the worker may be starting the run at this very moment.
     never_started = db.execute(
         update(SyncRun)
@@ -134,7 +142,8 @@ def delete_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Response:
     Safe: whether a comment was posted is recorded in posted_comments, not in the
     run history, so deleting a run can never cause a comment to be posted again.
     """
-    run = _get_run(db, user, run_id)
+    run, role = run_for(db, user, run_id)
+    need_run_manager(user, role, run)
     if run.status in ACTIVE_STATUSES:
         raise _run_active()
     db.delete(run)
@@ -152,8 +161,7 @@ def delete_runs(
     ] = None,
 ) -> RunsDeleted:
     """Delete a project's finished runs, for example every dry run. Active runs stay."""
-    if ProjectRepository(db, user.id).get(project_id) is None:
-        raise not_found("Project")
+    project_for(db, user, project_id, ProjectRole.EDITOR)
     statement = delete(SyncRun).where(
         SyncRun.project_id == project_id, SyncRun.status.not_in(ACTIVE_STATUSES)
     )
@@ -173,7 +181,7 @@ def list_run_items(
     action: Annotated[ItemAction | None, Query(description="Only items with this action")] = None,
 ) -> Page[RunItemResponse]:
     """Oldest commit first."""
-    run = _get_run(db, user, run_id)
+    run, _ = run_for(db, user, run_id)
     items, total = SyncRunRepository(db, user.id).items(
         run.id, action=action, offset=page.offset, limit=page.page_size
     )

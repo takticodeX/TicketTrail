@@ -1,4 +1,4 @@
-"""Sync runs and their items. Runs are owned through their project's owner_id."""
+"""Sync runs and their items. A user sees the runs of the projects they can access."""
 
 import uuid
 from collections.abc import Iterable, Sequence
@@ -12,28 +12,24 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     CommentStatus,
     PostedComment,
-    Project,
     ProjectCursor,
     RunStatus,
     SyncRun,
     SyncRunItem,
 )
+from app.db.repositories.access import accessible_project_ids
 
 
 class SyncRunRepository:
-    def __init__(self, session: Session, owner_id: uuid.UUID) -> None:
+    def __init__(self, session: Session, user_id: uuid.UUID) -> None:
         self.session = session
-        self.owner_id = owner_id
+        self.user_id = user_id
 
     def _owned(self) -> Any:
-        return (
-            select(SyncRun)
-            .join(Project, Project.id == SyncRun.project_id)
-            .where(Project.owner_id == self.owner_id)
-        )
+        return select(SyncRun).where(SyncRun.project_id.in_(accessible_project_ids(self.user_id)))
 
     def get(self, run_id: uuid.UUID) -> SyncRun | None:
-        """None both when the run doesn't exist and when another user owns it."""
+        """None both when the run doesn't exist and when the user can't access its project."""
         result: SyncRun | None = self.session.scalar(self._owned().where(SyncRun.id == run_id))
         return result
 

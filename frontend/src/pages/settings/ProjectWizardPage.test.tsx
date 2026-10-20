@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AzureConnection, GitConnection, Project } from '../../api/types';
 import { useAuth } from '../../hooks/useAuth';
-import { authValue, jsonResponse, mockFetch, renderWithProviders } from '../../test/utils';
+import { OWN_PROJECT, authValue, jsonResponse, mockFetch, renderWithProviders } from '../../test/utils';
 import { ProjectWizardPage } from './ProjectWizardPage';
 
 vi.mock('../../hooks/useAuth', () => ({ useAuth: vi.fn() }));
@@ -124,6 +124,7 @@ describe('ProjectWizardPage', () => {
       dry_run_default: false,
       created_at: '',
       updated_at: '',
+      ...OWN_PROJECT,
     };
     mockFetch({
       'GET /api/v1/projects/p1': () => jsonResponse(project),

@@ -5,13 +5,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { errorMessage } from '../../api/errors';
 import type { Project } from '../../api/types';
 import { confirmDelete } from '../../components/confirmDelete';
+import { RoleBadge } from '../../components/ProjectAccess';
 import { SettingsList } from '../../components/settings/SettingsList';
-import {
-  useAzureConnections,
-  useDeleteProject,
-  useGitConnections,
-  useProjects,
-} from '../../hooks/useSettings';
+import { useDeleteProject, useProjects } from '../../hooks/useSettings';
+import { canEdit, isOwner } from '../../lib/access';
 import { describeCron } from '../../lib/schedule';
 
 function scheduleLabel(project: Project): string {
@@ -26,12 +23,7 @@ function scheduleLabel(project: Project): string {
 export function ProjectsPage() {
   const navigate = useNavigate();
   const query = useProjects();
-  const git = useGitConnections();
-  const azure = useAzureConnections();
   const remove = useDeleteProject();
-
-  const gitName = (id: string) => git.data?.items.find((c) => c.id === id)?.name ?? '…';
-  const azureName = (id: string) => azure.data?.items.find((c) => c.id === id)?.name ?? '…';
 
   const onDelete = (project: Project) =>
     confirmDelete({
@@ -64,9 +56,14 @@ export function ProjectsPage() {
       renderRow={(project) => (
         <Table.Tr key={project.id}>
           <Table.Td>
-            <Anchor component={Link} to={`/settings/projects/${project.id}`} fw={500}>
+            <Anchor
+              component={Link}
+              to={canEdit(project) ? `/settings/projects/${project.id}` : `/projects/${project.id}`}
+              fw={500}
+            >
               {project.name}
             </Anchor>
+            <RoleBadge project={project} ml="xs" />
             {project.dry_run_default && (
               <Badge ml="xs" size="xs" variant="light" color="yellow">
                 Dry run
@@ -74,12 +71,12 @@ export function ProjectsPage() {
             )}
           </Table.Td>
           <Table.Td>
-            <Text size="sm">{gitName(project.git_connection_id)}</Text>
+            <Text size="sm">{project.git_connection?.name ?? '…'}</Text>
             <Text size="xs" c="dimmed">
               {project.branches.length > 0 ? project.branches.join(', ') : 'Default branch'}
             </Text>
           </Table.Td>
-          <Table.Td>{azureName(project.azure_connection_id)}</Table.Td>
+          <Table.Td>{project.azure_connection?.name ?? '…'}</Table.Td>
           <Table.Td>
             <Text size="sm">{scheduleLabel(project)}</Text>
           </Table.Td>
@@ -88,12 +85,16 @@ export function ProjectsPage() {
               <Button size="xs" variant="light" component={Link} to={`/projects/${project.id}`}>
                 Open
               </Button>
-              <Button size="xs" variant="default" component={Link} to={`/settings/projects/${project.id}`}>
-                Edit
-              </Button>
-              <Button size="xs" variant="subtle" color="red" onClick={() => onDelete(project)}>
-                Delete
-              </Button>
+              {canEdit(project) && (
+                <Button size="xs" variant="default" component={Link} to={`/settings/projects/${project.id}`}>
+                  Edit
+                </Button>
+              )}
+              {isOwner(project) && (
+                <Button size="xs" variant="subtle" color="red" onClick={() => onDelete(project)}>
+                  Delete
+                </Button>
+              )}
             </Group>
           </Table.Td>
         </Table.Tr>

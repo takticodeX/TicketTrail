@@ -7,7 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
 
 import { ROUTER_FUTURE } from '../App';
-import type { User } from '../api/types';
+import type { Project, User } from '../api/types';
 import type { AuthContextValue } from '../hooks/useAuth';
 import { theme } from '../theme';
 
@@ -36,6 +36,19 @@ export const testUser: User = {
   role: 'admin',
   is_active: true,
   created_at: '2026-10-15T10:00:00Z',
+};
+
+/** The sharing fields of a project the test user owns. */
+export const OWN_PROJECT: Pick<
+  Project,
+  'role' | 'owner' | 'schedule_timezone' | 'shares' | 'git_connection' | 'azure_connection'
+> = {
+  role: 'owner',
+  owner: { id: 'u1', display_name: 'Alice', email: 'alice@example.com' },
+  schedule_timezone: 'Europe/Rome',
+  shares: 0,
+  git_connection: null,
+  azure_connection: null,
 };
 
 /** A full auth context value for tests that mock useAuth. */
