@@ -1,5 +1,5 @@
 # TicketTrail
-
+ 
 TicketTrail reads the commits of a Git repository and posts each commit message as a
 comment on the Azure DevOps work items it references (for example `Fix login AB#123`).
 It runs as a small Docker Compose stack, supports several users, and never posts the same
