@@ -40,7 +40,7 @@ def add_share(
         raise AppError(404, "user_not_found", "No user with this email.")
     if target.id == user.id:
         raise AppError(409, "is_owner", "You own this project already.")
-    theirs = ProjectAccessRepository(db, target.id).get(project_id)
+    theirs = ProjectAccessRepository(db, target.id, is_admin=target.is_admin).get(project_id)
     if theirs is not None and theirs.role is ProjectRole.OWNER:
         # For example an admin of the organization that owns the project.
         raise AppError(409, "is_owner", "This user already has owner access to the project.")

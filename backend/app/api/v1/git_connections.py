@@ -15,7 +15,7 @@ from app.api.v1.schemas import (
     GitTestResult,
     Page,
 )
-from app.core.errors import AppError, field_error
+from app.core.errors import AppError, field_error, not_found
 from app.db.models import GitAuthType, GitConnection
 from app.db.repositories import GitConnectionRepository, ProjectRepository
 from app.integrations.git.hosts import commit_url_pattern, detect_host
@@ -49,9 +49,21 @@ def to_response(connection: GitConnection) -> GitConnectionResponse:
 
 
 def _scope(
-    db: DbSession, user: CurrentUser, organization_id: uuid.UUID | None, *, admin: bool
+    db: DbSession,
+    user: CurrentUser,
+    organization_id: uuid.UUID | None,
+    *,
+    admin: bool,
+    owner_id: uuid.UUID | None = None,
 ) -> GitConnectionRepository:
-    """The caller's own connections, or an organization's (members read, admins write)."""
+    """The caller's own connections, or an organization's (members read, admins write).
+
+    Administrators of the instance may also list another user's (owner_id).
+    """
+    if owner_id is not None and owner_id != user.id:
+        if not user.is_admin:
+            raise not_found("User")
+        return GitConnectionRepository(db, owner_id)
     if organization_id is None:
         return GitConnectionRepository(db, user.id)
     organization_for(db, user, organization_id, admin=admin)
@@ -77,8 +89,11 @@ def list_git_connections(
     organization_id: Annotated[
         uuid.UUID | None, Query(description="An organization's connections instead of yours")
     ] = None,
+    owner_id: Annotated[
+        uuid.UUID | None, Query(description="Administrators: another user's connections")
+    ] = None,
 ) -> Page[GitConnectionResponse]:
-    items, total = _scope(db, user, organization_id, admin=False).list(
+    items, total = _scope(db, user, organization_id, admin=False, owner_id=owner_id).list(
         offset=page.offset, limit=page.page_size
     )
     return Page(

@@ -98,7 +98,7 @@ Connections and projects belong to a user (`owner_id`) or to an organization (`o
 
 Personal connections are private to their owner; an organization's connections are seen, used and tested by its members and changed only by its admins. Every query on connections filters on their owner. All project and run queries go through one permission check, with the roles in this order: viewer < editor < owner. A user's role on a project is:
 
-- **owner** for the owner of a personal project, and for the admins of the organization that owns the project;
+- **owner** for the owner of a personal project, for the admins of the organization that owns the project, and for every administrator of the instance;
 - **editor** or **viewer** when the project is shared with them with that role;
 - **viewer** for the members of the organization that owns the project, unless a share raises them to editor.
 
@@ -118,7 +118,9 @@ Personal connections are private to their owner; an organization's connections a
 - An organization's project uses only that organization's connections. A member who creates a project in an organization becomes its editor.
 - Project names stay unique per owner, also when an editor renames a project.
 - Anyone a personal project is shared with can leave it. Removing someone from an organization (or their leaving it) also deletes their shares on its projects.
-- Administrators don't see other users' projects. They can list every project with its owner (no settings, no runs), transfer personal projects (section 8), and make a member the admin of an organization left without one.
+- **Administrators of the instance may do everything.** They open any project with the owner role (a project response says `admin_access: true` when only that gives the access), read, test, change and delete any connection, and act as an admin of every organization. Secrets stay write-only for them too: they can replace a token, never read it. Their own project list (the dashboard) still holds only their own, their organizations' and their shared projects; everything else is reached from the admin pages.
+- Whatever an administrator does to another user's resources (anything but reading: changes, syncs, run deletions, shares, moves, deletions, organization management) is logged by the `app.audit` logger, with the administrator and the resource.
+- Administrators also transfer personal projects (section 8) and can make a member the admin of an organization left without one.
 
 **Organizations**
 
@@ -267,7 +269,7 @@ The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoin
 | POST | `/auth/login` | Returns an access token (15 min) and a refresh token (7 days, httpOnly cookie) |
 | POST | `/auth/refresh` · `/auth/logout` | Rotate or revoke the refresh token. Require the header `X-Requested-With: TicketTrail` (CSRF) |
 | GET / PATCH | `/me` | Profile: name, time zone, password change |
-| GET / POST | `/git-connections` | List / create: the caller's own, or an organization's with `?organization_id=` (members list) / `organization_id` in the body (admins create) |
+| GET / POST | `/git-connections` | List / create: the caller's own, an organization's with `?organization_id=` (members list) / `organization_id` in the body (admins create), or another user's with `?owner_id=` (administrators) |
 | GET / PATCH / DELETE | `/git-connections/{id}` | Read / update / delete. Delete is refused (409, naming the projects) while a project uses the connection |
 | POST | `/git-connections/{id}/test` | Runs `git ls-remote` in the worker, returns `{ok, branches[], default_branch, error}` |
 | GET / POST | `/azure-connections` | List / create, personal or an organization's, as for Git connections |
@@ -296,6 +298,7 @@ The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoin
 | POST | `/admin/projects/{id}/transfer` | Admin only: body `{to_user_id}`. Gives the project and its connections to an active user; a connection the previous owner still uses elsewhere is copied |
 | POST | `/admin/users/{id}/transfer` | Admin only: body `{to_user_id}`. Gives everything the user owns personally (projects and connections) to an active user; organizations' rows stay |
 | GET | `/admin/organizations` | Admin only: every organization with its members, admins and counts |
+| GET | `/admin/git-connections` · `/admin/azure-connections` | Admin only: every connection with its owner (user or organization) and the number of projects using it. Secrets stay write-only |
 | POST | `/admin/organizations/{id}/admins` | Admin only: body `{user_id}`, a member who becomes an admin of the organization |
 | GET | `/admin/transfers` | Admin only: the transfer history, newest first |
 | GET | `/health` · `/ready` | Liveness / readiness (database, Redis) |
@@ -319,8 +322,9 @@ The UI is a responsive single-page app with light and dark themes. Everything a 
 | Settings → Organizations | `/settings/organizations`, `/settings/organizations/:id` | The user's organizations and **New organization**. An organization's page: name and time zone (admins), members (add by email, roles, remove, leave), its Git and Azure connections (admins add, edit, delete), its projects and **New project** |
 | Settings → Profile | `/settings/profile` | Display name, time zone, change password |
 | Admin → Users | `/admin/users` | Admins only: list users, turn accounts on or off, **Transfer all** of a user's projects and connections |
-| Admin → Projects | `/admin/projects` | Admins only: every project with its owner (a user or an organization), **Transfer** of personal projects to another user, and the transfer history |
-| Admin → Organizations | `/admin/organizations` | Admins only: every organization with its admins; **Make admin** for a member |
+| Admin → Projects | `/admin/projects` | Admins only: every project with its owner (a user or an organization), a link to open it with full rights, **Transfer** of personal projects to another user, and the transfer history |
+| Admin → Connections | `/admin/connections` | Admins only: every Git and Azure connection with its owner, to edit (and test), or delete |
+| Admin → Organizations | `/admin/organizations` | Admins only: every organization with its admins, a link to manage it as its admin; **Make admin** for a member |
 
 **UI rules**
 
@@ -337,7 +341,7 @@ TicketTrail stores other systems' credentials, so the security rules below are r
 
 - **Secrets at rest:** Fernet-encrypt every token, PAT and password with `TT_ENCRYPTION_KEY`. Support key rotation with `TT_ENCRYPTION_KEY_OLD` and a `manage.py rotate-keys` command.
 - **Secrets in transit and in logs:** never return secrets from the API or log them. A logging filter scrubs `Authorization` headers, URLs with credentials in them, and known secret fields. Git error output is cleaned before it is stored in `sync_run_items.detail`.
-- **Tenant isolation:** connection queries go through an owner filter; project and run queries go through the one permission check of section 4 (owner, organization membership, or shared with the caller). Add tests where user B tries to read, change, sync and test user A's resources, and where viewers and editors try what their role doesn't allow.
+- **Tenant isolation:** connection queries go through an owner filter; project and run queries go through the one permission check of section 4 (owner, organization membership, shared with the caller, or administrator). Add tests where user B tries to read, change, sync and test user A's resources, and where viewers and editors try what their role doesn't allow.
 - **Passwords:** Argon2id hashing, at least 10 characters, and login rate limits (5 attempts a minute per IP and per email, counted in Redis; if Redis is down, logins are not blocked).
 - **Tokens:** JWT access tokens signed with HS256 using `TT_JWT_SECRET`. Refresh tokens are httpOnly and SameSite=Strict cookies (Secure when `TT_PUBLIC_URL` is https), stored hashed, and rotated each time they are used. Reusing a rotated token signs the user out everywhere, except within a 30-second grace period (two tabs refreshing at once).
 - **Accounts turned off** by an admin are signed out everywhere at once, and their scheduled syncs stop.
@@ -509,7 +513,10 @@ Volumes: `pg_data` (database) and `repos_data` (Git clones). Only `frontend` pub
     - Members use and test the organization's connections without seeing tokens; only admins change them.
     - Removing a member ends their access; the last admin can't leave; a non-empty organization can't be deleted.
     - The Playwright test moves a project into an organization and the member finds it there.
-- Out of scope: instance-wide visibility and public links.
+- **S3 – Administrators see everything** *(done)*
+  - *Build:* the owner role on every project and admin rights on every organization for administrators, any connection readable and changeable (secrets still write-only), `?owner_id=` on the connection lists, `/admin/git-connections` and `/admin/azure-connections`, the `app.audit` log, `admin_access` on projects; UI: projects and organizations open from the admin pages, Admin → Connections, the administrator banner on a project.
+  - *Accept when:* an administrator syncs, edits, shares and deletes another user's project and edits or deletes their connections; their dashboard lists only their own projects; tokens never appear in any response; each such action is in the audit log; regular users still get 404.
+- Out of scope: instance-wide visibility for regular users, and public links.
 
 ## 13. Testing and definition of done
 
@@ -534,7 +541,7 @@ A milestone is done only when its acceptance criteria are met, its tests pass in
   - a force-pushed branch
   - each case asserts exactly one comment per pair
 - **Isolation suite:** for every endpoint, check that a second user gets 404 on the first user's resources.
-- **Access suite:** for each role, check what it may and may not do (section 4), plus the share endpoints and the administrator's transfers.
+- **Access suite:** for each role, check what it may and may not do (section 4), plus the share endpoints, the administrator's full access (and its audit log) and transfers.
 - **End to end (Playwright):** register → create both connections → create a project → dry run → real sync (Azure mocked) → see the history → share the project with a viewer → create an organization with the viewer as a member and move the project into it; the viewer finds it in the organization's section, starts a dry run and can't sync.
 
 **Quality bar**
@@ -563,3 +570,4 @@ Decisions taken at the milestone gates, already reflected in the sections above.
 | M7 | `TT_DB_PASSWORD` (default `tt`) and a "First start" section in the README | Defaults that work out of the box, changed on first start |
 | M8/S1 | Project sharing (viewer / editor), administrator transfers | Projects survive a colleague leaving; teams can work on the same project |
 | M8/S2 | Organizations: members are viewers by default, raised to editor per project with a share | Least privilege by default; editing rights are given project by project |
+| M8/S3 | Administrators see and may do everything (replacing "administrators don't see users' data"); tokens stay write-only; their actions on others' data are logged | Nothing is out of an administrator's reach; secrets still never leave the server |

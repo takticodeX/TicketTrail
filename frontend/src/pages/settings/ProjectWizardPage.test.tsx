@@ -95,7 +95,7 @@ describe('ProjectWizardPage', () => {
       schedule_cron: '0 * * * *',
       schedule_enabled: true,
     });
-  });
+  }, 30_000); // the longest user flow: headroom when every file runs in parallel
 
   it('does not advance past a step with errors', async () => {
     mockFetch({

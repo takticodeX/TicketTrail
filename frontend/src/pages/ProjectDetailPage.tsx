@@ -176,6 +176,13 @@ export function ProjectDetailPage() {
           <MoveProjectModal project={project.data} opened={moving} onClose={() => setMoving(false)} />
         </>
       )}
+      {project.data.admin_access && (
+        <Alert color="orange" variant="light" title="Administrator access">
+          This project belongs to{' '}
+          {project.data.organization?.name ?? project.data.owner?.display_name ?? 'another user'}. You can see and
+          change everything as an administrator; changes are recorded.
+        </Alert>
+      )}
       <Text size="sm" c="dimmed">
         A dry run lists which comments would be posted, without changing anything in Azure DevOps.
         {editable ? ' Sync now posts them.' : ' Only an editor can post them.'}

@@ -173,8 +173,22 @@ first. An organization can be deleted once it owns no projects and no connection
 The first account is the administrator. **Admin → Users** turns accounts off (which signs
 the user out everywhere and stops their schedules) and on again.
 
-An administrator does not see other users' projects, but **Admin → Projects** lists every
-project and its owner, so nothing is lost when someone leaves:
+An administrator sees and may do everything, on every project, connection and organization:
+
+- **Admin → Projects** lists every project with its owner (a user or an organization).
+  Click one to open it with the owner's rights: sync, change the settings and connections,
+  share, move or delete it. A banner reminds you that it isn't yours.
+- **Admin → Connections** lists every Git and Azure connection with its owner and how many
+  projects use it, to test, change or delete. Saved tokens are never shown, also to
+  administrators: you can replace one, not read it.
+- **Admin → Organizations** lists every organization; open one to manage it as its admin.
+- Your own Dashboard still shows only your projects, your organizations' and those shared
+  with you.
+
+Whatever an administrator changes, syncs or deletes on someone else's project, connection
+or organization is recorded in the API logs (logger `app.audit`), with who and what.
+
+Projects can also be given to another user, so nothing is lost when someone leaves:
 
 - **Transfer** gives one project to another user, with the connections it uses. A
   connection the previous owner still uses in another project is copied instead.
@@ -183,12 +197,11 @@ project and its owner, so nothing is lost when someone leaves:
 
 Tokens move still encrypted, the run history and posted comments come along, and names
 the new owner already uses get a suffix such as "Billing (from Marco)". Every transfer is
-listed under **Transfer history**. To look inside a project, an administrator transfers it
-or asks the owner to share it.
+listed under **Transfer history**.
 
-Organizations' projects are not transferred this way: their admins move them. **Admin →
-Organizations** lists every organization with its admins, and **Make admin** promotes a
-member of an organization that has no admin left.
+Organizations' projects are not transferred this way: an admin of the organization (an
+administrator counts as one) moves them with **Move to a member**. **Make admin** on
+**Admin → Organizations** promotes a member of an organization that has no admin left.
 
 ## 3. Access tokens: minimum scopes per host
 
@@ -325,7 +338,8 @@ To rotate `TT_JWT_SECRET`, change it and restart: everyone has to log in again.
 - Every user only sees their own connections and their organizations' connections, and
   the projects (with their runs) they own, see through an organization, or that are shared
   with them. Other projects answer 404. Shared users never see or use the owner's
-  connections directly.
+  connections directly. Administrators see everything, and their changes to other users'
+  data are logged (logger `app.audit`); tokens stay write-only for them too.
 - Credentials are passed to Git through the environment, never in URLs, Git config or
   command lines. Logs are JSON and mask Authorization headers, credentials in URLs and
   secret fields.

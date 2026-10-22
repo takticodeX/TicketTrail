@@ -2,8 +2,12 @@
 
 No access at all answers 404, as if the resource didn't exist; access with too weak
 a role answers 403, since the user already knows the resource.
+
+Administrators of the instance may do everything. What they do to other users'
+resources (anything but reading) is recorded in the logs.
 """
 
+import logging
 import uuid
 
 from sqlalchemy.orm import Session
@@ -17,6 +21,8 @@ from app.db.repositories import (
     SeenProject,
     SyncRunRepository,
 )
+
+logger = logging.getLogger("app.audit")
 
 _WHO = {
     ProjectRole.VIEWER: "someone it is shared with",
@@ -37,20 +43,32 @@ def project_for(
     db: Session, user: User, project_id: uuid.UUID, need: ProjectRole = ProjectRole.VIEWER
 ) -> SeenProject:
     """The project, the user's role on it, and its owner."""
-    seen = ProjectAccessRepository(db, user.id).get(project_id)
+    seen = ProjectAccessRepository(db, user.id, is_admin=user.is_admin).get(project_id)
     if seen is None:
         raise not_found("Project")
     if not seen.role.at_least(need):
         raise insufficient_role(need)
+    if seen.via_admin and need is not ProjectRole.VIEWER:
+        audit(user, f"{need.value} action on project {seen.project.id} ({seen.project.name!r})")
     return seen
 
 
-def run_for(db: Session, user: User, run_id: uuid.UUID) -> tuple[SyncRun, ProjectRole]:
-    """The run and the user's role on its project."""
-    run = SyncRunRepository(db, user.id).get(run_id)
+def audit(user: User, what: str) -> None:
+    """Record what an administrator did to someone else's resource."""
+    logger.info("Admin %s (%s): %s", user.id, user.email, what)
+
+
+def run_for(
+    db: Session, user: User, run_id: uuid.UUID, *, action: str | None = None
+) -> tuple[SyncRun, ProjectRole]:
+    """The run and the user's role on its project. `action` is recorded for administrators."""
+    run = SyncRunRepository(db, user.id, is_admin=user.is_admin).get(run_id)
     if run is None:
         raise not_found("Run")
-    return run, project_for(db, user, run.project_id).role
+    seen = project_for(db, user, run.project_id)
+    if action is not None and seen.via_admin:
+        audit(user, f"{action} run {run.id} of project {seen.project.id} ({seen.project.name!r})")
+    return run, seen.role
 
 
 def can_manage_run(user: User, role: ProjectRole, run: SyncRun) -> bool:
@@ -67,11 +85,13 @@ def organization_for(
     db: Session, user: User, organization_id: uuid.UUID, *, admin: bool = False
 ) -> tuple[Organization, OrganizationRole]:
     """The organization and the user's role in it. Non-members get 404."""
-    found = OrganizationRepository(db, user.id).get(organization_id)
+    found = OrganizationRepository(db, user.id, is_admin=user.is_admin).get(organization_id)
     if found is None:
         raise not_found("Organization")
     if admin and found[1] is not OrganizationRole.ADMIN:
         raise not_organization_admin()
+    if admin and user.is_admin and OrganizationRepository(db, user.id).get(organization_id) is None:
+        audit(user, f"admin action on organization {organization_id} ({found[0].name!r})")
     return found
 
 
@@ -87,6 +107,10 @@ def connection_for[C: OwnedModel](
     if connection is None:
         raise not_found(what)
     if connection.owner_id == user.id:
+        return connection
+    if user.is_admin:
+        if write:
+            audit(user, f"change to {what.lower()} {connection.id} ({connection.name!r})")
         return connection
     if connection.organization_id is not None:
         found = OrganizationRepository(db, user.id).get(connection.organization_id)

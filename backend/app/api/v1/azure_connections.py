@@ -16,7 +16,7 @@ from app.api.v1.schemas import (
     AzureTestResult,
     Page,
 )
-from app.core.errors import AppError
+from app.core.errors import AppError, not_found
 from app.db.models import AzureConnection
 from app.db.repositories import AzureConnectionRepository, ProjectRepository
 from app.worker import task_names
@@ -41,9 +41,21 @@ def to_response(connection: AzureConnection) -> AzureConnectionResponse:
 
 
 def _scope(
-    db: DbSession, user: CurrentUser, organization_id: uuid.UUID | None, *, admin: bool
+    db: DbSession,
+    user: CurrentUser,
+    organization_id: uuid.UUID | None,
+    *,
+    admin: bool,
+    owner_id: uuid.UUID | None = None,
 ) -> AzureConnectionRepository:
-    """The caller's own connections, or an organization's (members read, admins write)."""
+    """The caller's own connections, or an organization's (members read, admins write).
+
+    Administrators of the instance may also list another user's (owner_id).
+    """
+    if owner_id is not None and owner_id != user.id:
+        if not user.is_admin:
+            raise not_found("User")
+        return AzureConnectionRepository(db, owner_id)
     if organization_id is None:
         return AzureConnectionRepository(db, user.id)
     organization_for(db, user, organization_id, admin=admin)
@@ -69,8 +81,11 @@ def list_azure_connections(
     organization_id: Annotated[
         uuid.UUID | None, Query(description="An organization's connections instead of yours")
     ] = None,
+    owner_id: Annotated[
+        uuid.UUID | None, Query(description="Administrators: another user's connections")
+    ] = None,
 ) -> Page[AzureConnectionResponse]:
-    items, total = _scope(db, user, organization_id, admin=False).list(
+    items, total = _scope(db, user, organization_id, admin=False, owner_id=owner_id).list(
         offset=page.offset, limit=page.page_size
     )
     return Page(

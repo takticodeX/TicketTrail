@@ -105,8 +105,10 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
   const [organizationId, setOrganizationId] = useState<string | null>(
     project ? (project.organization?.id ?? null) : searchParams.get('organization'),
   );
-  const gitConnections = useGitConnections(organizationId);
-  const azureConnections = useAzureConnections(organizationId);
+  // An administrator editing someone else's personal project picks among that user's connections.
+  const connectionOwnerId = project?.owner && project.owner.id !== user?.id ? project.owner.id : null;
+  const gitConnections = useGitConnections(organizationId, connectionOwnerId);
+  const azureConnections = useAzureConnections(organizationId, connectionOwnerId);
   const save = useSaveProject();
   const loadBranches = useTestGitConnection();
 

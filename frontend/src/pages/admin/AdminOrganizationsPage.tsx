@@ -1,7 +1,24 @@
-import { Alert, Badge, Button, Center, Group, Loader, Modal, Pagination, Paper, Select, Stack, Table, Text, Title } from '@mantine/core';
+import {
+  Alert,
+  Anchor,
+  Badge,
+  Button,
+  Center,
+  Group,
+  Loader,
+  Modal,
+  Pagination,
+  Paper,
+  Select,
+  Stack,
+  Table,
+  Text,
+  Title,
+} from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { listAllOrganizations, promoteAdmin, type AdminOrganization } from '../../api/admin';
 import { errorMessage, firstFieldMessage } from '../../api/errors';
@@ -80,8 +97,8 @@ export function AdminOrganizationsPage() {
       <div>
         <Title order={2}>Organizations</Title>
         <Text c="dimmed" size="sm">
-          Every organization on this instance. Their admins manage them; you can make a member an admin when an
-          organization has none left.
+          Every organization on this instance. Open one to manage it as its admin, or make a member an admin when
+          an organization has none left.
         </Text>
       </div>
       {organizations.isPending && (
@@ -116,9 +133,9 @@ export function AdminOrganizationsPage() {
                 {organizations.data.items.map((org) => (
                   <Table.Tr key={org.id}>
                     <Table.Td>
-                      <Text size="sm" fw={500}>
+                      <Anchor component={Link} to={`/settings/organizations/${org.id}`} size="sm" fw={500}>
                         {org.name}
-                      </Text>
+                      </Anchor>
                     </Table.Td>
                     <Table.Td>
                       {org.admins.length > 0 ? (

@@ -188,6 +188,9 @@ class ProjectResponse(BaseModel):
         default="UTC", description="The owner's time zone, which the schedule runs in"
     )
     shares: int = Field(default=0, description="Number of users the project is shared with")
+    admin_access: bool = Field(
+        default=False, description="You see it only because you are an administrator"
+    )
     git_connection: ProjectGitSummary | None = None
     azure_connection: ProjectAzureSummary | None = None
 

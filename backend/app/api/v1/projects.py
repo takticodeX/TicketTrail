@@ -174,6 +174,7 @@ def _responses(db: DbSession, seen: Sequence[SeenProject]) -> list[ProjectRespon
                     ),
                     "schedule_timezone": item.timezone,
                     "shares": shares.get(project.id, 0),
+                    "admin_access": item.via_admin,
                     "git_connection": gits.get(project.git_connection_id),
                     "azure_connection": azures.get(project.azure_connection_id),
                 }
@@ -183,7 +184,7 @@ def _responses(db: DbSession, seen: Sequence[SeenProject]) -> list[ProjectRespon
 
 
 def _response(db: DbSession, user: User, project_id: uuid.UUID) -> ProjectResponse:
-    seen = ProjectAccessRepository(db, user.id).get(project_id)
+    seen = ProjectAccessRepository(db, user.id, is_admin=user.is_admin).get(project_id)
     assert seen is not None  # noqa: S101  (the caller just checked or created it)
     return _responses(db, [seen])[0]
 

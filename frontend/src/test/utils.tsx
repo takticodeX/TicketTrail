@@ -41,13 +41,21 @@ export const testUser: User = {
 /** The sharing fields of a project the test user owns. */
 export const OWN_PROJECT: Pick<
   Project,
-  'role' | 'owner' | 'organization' | 'schedule_timezone' | 'shares' | 'git_connection' | 'azure_connection'
+  | 'role'
+  | 'owner'
+  | 'organization'
+  | 'schedule_timezone'
+  | 'shares'
+  | 'admin_access'
+  | 'git_connection'
+  | 'azure_connection'
 > = {
   role: 'owner',
   owner: { id: 'u1', display_name: 'Alice', email: 'alice@example.com' },
   organization: null,
   schedule_timezone: 'Europe/Rome',
   shares: 0,
+  admin_access: false,
   git_connection: null,
   azure_connection: null,
 };

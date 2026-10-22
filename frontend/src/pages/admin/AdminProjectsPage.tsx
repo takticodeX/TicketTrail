@@ -1,6 +1,7 @@
-import { Alert, Badge, Button, Center, Loader, Pagination, Paper, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Anchor, Badge, Button, Center, Loader, Pagination, Paper, Stack, Table, Text, Title } from '@mantine/core';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { listAllProjects, listTransfers, transferProject, type AdminProject } from '../../api/admin';
 import { errorMessage } from '../../api/errors';
@@ -78,8 +79,8 @@ export function AdminProjectsPage() {
       <div>
         <Title order={2}>Projects</Title>
         <Text c="dimmed" size="sm">
-          Every project and its owner. You don't see their settings or runs: transfer a project to give it a new
-          owner, for example when a colleague leaves.
+          Every project and its owner. Open one to see and change everything, or transfer it to a new owner, for
+          example when a colleague leaves.
         </Text>
       </div>
       {projects.isPending && (
@@ -114,9 +115,9 @@ export function AdminProjectsPage() {
                 {projects.data.items.map((project) => (
                   <Table.Tr key={project.id}>
                     <Table.Td>
-                      <Text size="sm" fw={500}>
+                      <Anchor component={Link} to={`/projects/${project.id}`} size="sm" fw={500}>
                         {project.name}
-                      </Text>
+                      </Anchor>
                     </Table.Td>
                     <Table.Td>
                       {project.owner ? (

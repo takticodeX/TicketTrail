@@ -1,5 +1,14 @@
 import { apiRequest } from './client';
-import type { OrganizationMember, OrganizationSummary, Page, SyncRun, User, UserSummary } from './types';
+import type {
+  AzureConnection,
+  GitConnection,
+  OrganizationMember,
+  OrganizationSummary,
+  Page,
+  SyncRun,
+  User,
+  UserSummary,
+} from './types';
 
 export interface AdminUser extends User {
   projects: number;
@@ -71,6 +80,23 @@ export const promoteAdmin = (organizationId: string, userId: string) =>
     method: 'POST',
     body: { user_id: userId },
   });
+
+/** Who owns a connection, in the administrator's list. */
+export interface ConnectionOwner {
+  owner: (UserSummary & { is_active: boolean }) | null;
+  organization: OrganizationSummary | null;
+  /** Number of projects that use it. */
+  projects: number;
+}
+
+export type AdminGitConnection = GitConnection & ConnectionOwner;
+export type AdminAzureConnection = AzureConnection & ConnectionOwner;
+
+export const listAllGitConnections = (page: number, pageSize = 100) =>
+  apiRequest<Page<AdminGitConnection>>(`/admin/git-connections?page=${page}&page_size=${pageSize}`);
+
+export const listAllAzureConnections = (page: number, pageSize = 100) =>
+  apiRequest<Page<AdminAzureConnection>>(`/admin/azure-connections?page=${page}&page_size=${pageSize}`);
 
 export const listTransfers = (page: number, pageSize = 20) =>
   apiRequest<Page<OwnershipTransfer>>(`/admin/transfers?page=${page}&page_size=${pageSize}`);

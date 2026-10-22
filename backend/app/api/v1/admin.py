@@ -8,13 +8,17 @@ Every transfer is recorded.
 import logging
 import uuid
 from collections.abc import Sequence
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
 from app.api.deps import AdminUser, DbSession, PageDep
+from app.api.v1.azure_connections import to_response as azure_response
+from app.api.v1.git_connections import to_response as git_response
 from app.api.v1.schemas import (
+    AdminAzureConnectionResponse,
+    AdminGitConnectionResponse,
     AdminOrganizationResponse,
     AdminProjectResponse,
     AdminUserResponse,
@@ -32,6 +36,8 @@ from app.api.v1.schemas import (
 )
 from app.core.errors import AppError, field_error, not_found
 from app.db.models import (
+    AzureConnection,
+    GitConnection,
     Organization,
     OrganizationMember,
     OrganizationRole,
@@ -344,3 +350,82 @@ def promote_admin(
         organization_id,
     )
     return _organization_responses(db, [organization])[0]
+
+
+def _connection_owners(
+    db: DbSession, connections: Sequence[GitConnection] | Sequence[AzureConnection], column: Any
+) -> tuple[dict[uuid.UUID, User], dict[uuid.UUID, Organization], dict[uuid.UUID, int]]:
+    user_ids = {c.owner_id for c in connections if c.owner_id}
+    org_ids = {c.organization_id for c in connections if c.organization_id}
+    users = {u.id: u for u in db.scalars(select(User).where(User.id.in_(user_ids)))}
+    orgs = {o.id: o for o in db.scalars(select(Organization).where(Organization.id.in_(org_ids)))}
+    usage = db.execute(
+        select(column, func.count()).where(column.in_([c.id for c in connections])).group_by(column)
+    ).all()
+    return users, orgs, {connection_id: count for connection_id, count in usage}
+
+
+def _owner_fields(
+    connection: GitConnection | AzureConnection,
+    users: dict[uuid.UUID, User],
+    orgs: dict[uuid.UUID, Organization],
+    usage: dict[uuid.UUID, int],
+) -> dict[str, Any]:
+    owner = users.get(connection.owner_id) if connection.owner_id else None
+    org = orgs.get(connection.organization_id) if connection.organization_id else None
+    return {
+        "owner": _admin_summary(owner) if owner else None,
+        "organization": OrganizationSummary.model_validate(org) if org else None,
+        "projects": usage.get(connection.id, 0),
+    }
+
+
+def _all(db: DbSession, model: type[Any], page: PageDep) -> tuple[Sequence[Any], int]:
+    total = db.scalar(select(func.count()).select_from(model)) or 0
+    items = db.scalars(
+        select(model)
+        .order_by(model.name, model.created_at, model.id)
+        .offset(page.offset)
+        .limit(page.page_size)
+    ).all()
+    return items, total
+
+
+@router.get("/git-connections")
+def list_all_git_connections(
+    admin: AdminUser, db: DbSession, page: PageDep
+) -> Page[AdminGitConnectionResponse]:
+    """Every Git connection with its owner. Secrets stay write-only, also for admins."""
+    items, total = _all(db, GitConnection, page)
+    users, orgs, usage = _connection_owners(db, items, Project.git_connection_id)
+    return Page(
+        items=[
+            AdminGitConnectionResponse(
+                **git_response(c).model_dump(), **_owner_fields(c, users, orgs, usage)
+            )
+            for c in items
+        ],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
+    )
+
+
+@router.get("/azure-connections")
+def list_all_azure_connections(
+    admin: AdminUser, db: DbSession, page: PageDep
+) -> Page[AdminAzureConnectionResponse]:
+    """Every Azure connection with its owner. PATs stay write-only, also for admins."""
+    items, total = _all(db, AzureConnection, page)
+    users, orgs, usage = _connection_owners(db, items, Project.azure_connection_id)
+    return Page(
+        items=[
+            AdminAzureConnectionResponse(
+                **azure_response(c).model_dump(), **_owner_fields(c, users, orgs, usage)
+            )
+            for c in items
+        ],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
+    )

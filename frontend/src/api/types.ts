@@ -148,6 +148,8 @@ export interface Project {
   schedule_timezone: string;
   /** Number of users the project is shared with. */
   shares: number;
+  /** You see it only because you are an administrator. */
+  admin_access: boolean;
   /** The connections without their secrets, so shared users can show them too. */
   git_connection: ProjectGitSummary | null;
   azure_connection: ProjectAzureSummary | null;
@@ -178,6 +180,7 @@ export type ProjectInput = Omit<
   | 'organization'
   | 'schedule_timezone'
   | 'shares'
+  | 'admin_access'
   | 'git_connection'
   | 'azure_connection'
 > & {

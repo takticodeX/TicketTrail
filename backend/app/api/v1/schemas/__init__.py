@@ -60,6 +60,8 @@ from app.api.v1.schemas.runs import (
     SyncStarted,
 )
 from app.api.v1.schemas.sharing import (
+    AdminAzureConnectionResponse,
+    AdminGitConnectionResponse,
     AdminProjectResponse,
     AdminUserSummary,
     ShareCreate,
@@ -72,6 +74,8 @@ from app.api.v1.schemas.sharing import (
 __all__ = [
     "DEFAULT_PAGE_SIZE",
     "MAX_PAGE_SIZE",
+    "AdminAzureConnectionResponse",
+    "AdminGitConnectionResponse",
     "AdminOrganizationResponse",
     "AdminProjectResponse",
     "AdminUserResponse",

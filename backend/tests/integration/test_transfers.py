@@ -83,14 +83,6 @@ def test_admin_lists_every_project_with_its_owner(
     assert [p["name"] for p in only_marco["items"]] == ["Billing"]
 
 
-def test_admin_does_not_get_into_projects_otherwise(
-    client: TestClient, admin: Person, marco: Person
-) -> None:
-    project = create_project(client, marco.headers)
-    assert client.get(f"{API}/projects/{project['id']}", headers=admin.headers).status_code == 404
-    assert client.get(f"{API}/projects", headers=admin.headers).json()["total"] == 0
-
-
 def test_only_admins_can_transfer(
     client: TestClient, admin: Person, marco: Person, anna: Person
 ) -> None:

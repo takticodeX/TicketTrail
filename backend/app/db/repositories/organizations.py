@@ -20,9 +20,10 @@ from app.db.models import (
 class OrganizationRepository:
     """Organizations as seen by one user: only those they belong to."""
 
-    def __init__(self, session: Session, user_id: uuid.UUID) -> None:
+    def __init__(self, session: Session, user_id: uuid.UUID, *, is_admin: bool = False) -> None:
         self.session = session
         self.user_id = user_id
+        self.is_admin = is_admin
 
     def mine(self) -> list[tuple[Organization, OrganizationRole]]:
         rows = self.session.execute(
@@ -34,7 +35,13 @@ class OrganizationRepository:
         return [(org, OrganizationRole(role)) for org, role in rows]
 
     def get(self, organization_id: uuid.UUID) -> tuple[Organization, OrganizationRole] | None:
-        """None both when it doesn't exist and when the user isn't a member."""
+        """None both when it doesn't exist and when the user isn't a member.
+
+        An administrator of the instance counts as an admin of every organization.
+        """
+        if self.is_admin:
+            org = self.session.get(Organization, organization_id)
+            return None if org is None else (org, OrganizationRole.ADMIN)
         row = self.session.execute(
             select(Organization, OrganizationMember.role)
             .join(OrganizationMember, OrganizationMember.organization_id == Organization.id)

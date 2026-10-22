@@ -11,18 +11,28 @@ export const settingsKeys = {
   project: (id: string) => ['projects', id] as const,
 };
 
-/** Yours, or an organization's. Keys share a prefix, so saving one refreshes all. */
-export function useGitConnections(organizationId?: string | null) {
+/** A query-key suffix for whose connections are listed; empty for your own. */
+function scopeKey({ organizationId, ownerId }: api.ConnectionScope): string[] {
+  return organizationId ? [organizationId] : ownerId ? [`user:${ownerId}`] : [];
+}
+
+/**
+ * Yours, an organization's (`organizationId`) or, for administrators, another user's
+ * (`ownerId`). Keys share a prefix, so saving one refreshes all.
+ */
+export function useGitConnections(organizationId?: string | null, ownerId?: string | null) {
+  const scope = { organizationId, ownerId };
   return useQuery({
-    queryKey: organizationId ? [...settingsKeys.git, organizationId] : settingsKeys.git,
-    queryFn: () => api.listGitConnections(organizationId ?? undefined),
+    queryKey: [...settingsKeys.git, ...scopeKey(scope)],
+    queryFn: () => api.listGitConnections(scope),
   });
 }
 
-export function useAzureConnections(organizationId?: string | null) {
+export function useAzureConnections(organizationId?: string | null, ownerId?: string | null) {
+  const scope = { organizationId, ownerId };
   return useQuery({
-    queryKey: organizationId ? [...settingsKeys.azure, organizationId] : settingsKeys.azure,
-    queryFn: () => api.listAzureConnections(organizationId ?? undefined),
+    queryKey: [...settingsKeys.azure, ...scopeKey(scope)],
+    queryFn: () => api.listAzureConnections(scope),
   });
 }
 

@@ -21,11 +21,14 @@ from app.db.repositories.access import accessible_project_ids
 
 
 class SyncRunRepository:
-    def __init__(self, session: Session, user_id: uuid.UUID) -> None:
+    def __init__(self, session: Session, user_id: uuid.UUID, *, is_admin: bool = False) -> None:
         self.session = session
         self.user_id = user_id
+        self.is_admin = is_admin
 
     def _owned(self) -> Any:
+        if self.is_admin:  # administrators see every run
+            return select(SyncRun)
         return select(SyncRun).where(SyncRun.project_id.in_(accessible_project_ids(self.user_id)))
 
     def get(self, run_id: uuid.UUID) -> SyncRun | None:

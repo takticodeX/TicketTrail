@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Response, status
 from sqlalchemy import delete, func, update
 
-from app.api.access import insufficient_role, need_run_manager, project_for, run_for
+from app.api.access import audit, insufficient_role, need_run_manager, project_for, run_for
 from app.api.deps import CurrentUser, DbSession, PageDep, TaskRunnerDep
 from app.api.v1.git_connections import worker_unavailable
 from app.api.v1.schemas import (
@@ -53,6 +53,9 @@ def start_sync(
     dry_run = project.dry_run_default if body.dry_run is None else body.dry_run
     if not dry_run and not role.at_least(ProjectRole.EDITOR):
         raise insufficient_role(ProjectRole.EDITOR)
+    if seen.via_admin:
+        kind = "dry run" if dry_run else "sync"
+        audit(user, f"{kind} of project {project.id} ({project.name!r})")
     run = SyncRun(
         project_id=project.id, trigger=RunTrigger.MANUAL, dry_run=dry_run, triggered_by_id=user.id
     )
@@ -104,7 +107,7 @@ def get_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> RunDetailRes
 )
 def cancel_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> RunResponse:
     """Cooperative cancel: a queued run never starts; a running one stops between commits."""
-    run, role = run_for(db, user, run_id)
+    run, role = run_for(db, user, run_id, action="cancel")
     need_run_manager(user, role, run)
     # Conditional updates: the worker may be starting the run at this very moment.
     never_started = db.execute(
@@ -143,7 +146,7 @@ def delete_run(run_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Response:
     Safe: whether a comment was posted is recorded in posted_comments, not in the
     run history, so deleting a run can never cause a comment to be posted again.
     """
-    run, role = run_for(db, user, run_id)
+    run, role = run_for(db, user, run_id, action="delete")
     need_run_manager(user, role, run)
     if run.status in ACTIVE_STATUSES:
         raise _run_active()

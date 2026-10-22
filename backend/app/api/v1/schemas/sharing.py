@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.api.v1.schemas.common import OrganizationSummary, UserSummary
+from app.api.v1.schemas.connections import AzureConnectionResponse, GitConnectionResponse
 from app.api.v1.schemas.runs import RunResponse
 
 ShareRoleName = Literal["viewer", "editor"]
@@ -71,3 +72,19 @@ class TransferResponse(BaseModel):
         description="Connections still used by the previous owner's other projects are copied"
     )
     summary: str
+
+
+class AdminConnectionOwner(BaseModel):
+    """Who owns a connection, for the administrator's list."""
+
+    owner: AdminUserSummary | None = Field(description="Null for an organization's connection")
+    organization: OrganizationSummary | None
+    projects: int = Field(description="Number of projects that use it")
+
+
+class AdminGitConnectionResponse(GitConnectionResponse, AdminConnectionOwner):
+    pass
+
+
+class AdminAzureConnectionResponse(AzureConnectionResponse, AdminConnectionOwner):
+    pass

@@ -6,7 +6,8 @@ in one place:
 - the owner of a personal project, and the admins of an organization's project,
   have the owner role;
 - the members of an organization are viewers of its projects;
-- a share (viewer or editor) gives that role, or raises a member's.
+- a share (viewer or editor) gives that role, or raises a member's;
+- an administrator of the instance has the owner role on every project.
 """
 
 import uuid
@@ -15,7 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import Select, and_, case, func, or_, select
+from sqlalchemy import Select, and_, case, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -44,6 +45,8 @@ class SeenProject:
     role: ProjectRole
     owner: User | None
     organization: Organization | None
+    # True when only being an administrator gives the access (recorded in the logs).
+    via_admin: bool = False
 
     @property
     def timezone(self) -> str:
@@ -71,20 +74,28 @@ def accessible_project_ids(user_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
 class ProjectAccessRepository:
     """Projects as seen by one user, each with that user's role on it."""
 
-    def __init__(self, session: Session, user_id: uuid.UUID) -> None:
+    def __init__(self, session: Session, user_id: uuid.UUID, *, is_admin: bool = False) -> None:
         self.session = session
         self.user_id = user_id
+        self.is_admin = is_admin
 
-    def _query(self, scope: ProjectScope = ProjectScope.ALL) -> Any:
+    def _query(self, scope: ProjectScope = ProjectScope.ALL, *, every: bool = False) -> Any:
+        """`every`: an administrator's view of one project, whoever owns it."""
         member = OrganizationMember
+        direct = or_(
+            Project.owner_id == self.user_id,
+            member.id.is_not(None),
+            ProjectShare.id.is_not(None),
+        )
         role = case(
+            (literal(self.is_admin), ProjectRole.OWNER.value),
             (Project.owner_id == self.user_id, ProjectRole.OWNER.value),
             (member.role == OrganizationRole.ADMIN.value, ProjectRole.OWNER.value),
             (ProjectShare.role == ProjectRole.EDITOR.value, ProjectRole.EDITOR.value),
             else_=ProjectRole.VIEWER.value,
         )
         query = (
-            select(Project, role, User, Organization)
+            select(Project, role, User, Organization, direct)
             .outerjoin(User, User.id == Project.owner_id)
             .outerjoin(Organization, Organization.id == Project.organization_id)
             .outerjoin(
@@ -99,6 +110,8 @@ class ProjectAccessRepository:
                 ),
             )
         )
+        if every and self.is_admin:
+            return query
         if scope is ProjectScope.OWNED:
             return query.where(Project.owner_id == self.user_id)
         if scope is ProjectScope.ORGANIZATIONS:
@@ -109,22 +122,18 @@ class ProjectAccessRepository:
                 Project.owner_id.is_distinct_from(self.user_id),
                 member.id.is_(None),
             )
-        return query.where(
-            or_(
-                Project.owner_id == self.user_id,
-                member.id.is_not(None),
-                ProjectShare.id.is_not(None),
-            )
-        )
+        # The list (the dashboard) stays the user's own, also for an administrator.
+        return query.where(direct)
 
     @staticmethod
     def _seen(row: Any) -> SeenProject:
-        project, role, owner, organization = row
-        return SeenProject(project, ProjectRole(role), owner, organization)
+        project, role, owner, organization, direct = row
+        return SeenProject(project, ProjectRole(role), owner, organization, via_admin=not direct)
 
     def get(self, project_id: uuid.UUID) -> SeenProject | None:
         """None both when the project doesn't exist and when the user has no access to it."""
-        row = self.session.execute(self._query().where(Project.id == project_id)).first()
+        query = self._query(every=True).where(Project.id == project_id)
+        row = self.session.execute(query).first()
         return None if row is None else self._seen(row)
 
     def list(

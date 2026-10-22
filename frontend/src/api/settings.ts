@@ -17,9 +17,17 @@ import type {
 // Settings lists are small; one page of the maximum size holds them.
 const ALL = '?page_size=100';
 
-/** Yours, or an organization's when organizationId is given. */
-export const listGitConnections = (organizationId?: string) =>
-  apiRequest<Page<GitConnection>>(`/git-connections${ALL}${organizationId ? `&organization_id=${organizationId}` : ''}`);
+/** Whose connections: yours by default, an organization's, or (administrators) a user's. */
+export interface ConnectionScope {
+  organizationId?: string | null;
+  ownerId?: string | null;
+}
+
+const scopeQuery = ({ organizationId, ownerId }: ConnectionScope = {}) =>
+  organizationId ? `&organization_id=${organizationId}` : ownerId ? `&owner_id=${ownerId}` : '';
+
+export const listGitConnections = (scope?: ConnectionScope) =>
+  apiRequest<Page<GitConnection>>(`/git-connections${ALL}${scopeQuery(scope)}`);
 export const createGitConnection = (body: GitConnectionInput) =>
   apiRequest<GitConnection>('/git-connections', { method: 'POST', body });
 export const updateGitConnection = (id: string, body: Partial<GitConnectionInput>) =>
@@ -29,10 +37,8 @@ export const deleteGitConnection = (id: string) =>
 export const testGitConnection = (id: string) =>
   apiRequest<GitTestResult>(`/git-connections/${id}/test`, { method: 'POST' });
 
-export const listAzureConnections = (organizationId?: string) =>
-  apiRequest<Page<AzureConnection>>(
-    `/azure-connections${ALL}${organizationId ? `&organization_id=${organizationId}` : ''}`,
-  );
+export const listAzureConnections = (scope?: ConnectionScope) =>
+  apiRequest<Page<AzureConnection>>(`/azure-connections${ALL}${scopeQuery(scope)}`);
 export const createAzureConnection = (body: AzureConnectionInput) =>
   apiRequest<AzureConnection>('/azure-connections', { method: 'POST', body });
 export const updateAzureConnection = (id: string, body: Partial<AzureConnectionInput>) =>
