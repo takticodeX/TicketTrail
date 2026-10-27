@@ -11,7 +11,14 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Response, status
 from sqlalchemy import delete, func, update
 
-from app.api.access import audit_project, insufficient_role, need_run_manager, project_for, run_for
+from app.api.access import (
+    audit_project,
+    audited,
+    insufficient_role,
+    need_run_manager,
+    project_for,
+    run_for,
+)
 from app.api.deps import CurrentUser, DbSession, PageDep, TaskRunnerDep
 from app.api.v1.git_connections import worker_unavailable
 from app.api.v1.schemas import (
@@ -53,7 +60,7 @@ def start_sync(
     dry_run = project.dry_run_default if body.dry_run is None else body.dry_run
     if not dry_run and not role.at_least(ProjectRole.EDITOR):
         raise insufficient_role(ProjectRole.EDITOR)
-    if seen.via_admin:
+    if audited(user, project.owner_id):
         audit_project(db, user, seen, "dry run" if dry_run else "sync")
     run = SyncRun(
         project_id=project.id, trigger=RunTrigger.MANUAL, dry_run=dry_run, triggered_by_id=user.id

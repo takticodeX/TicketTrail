@@ -287,3 +287,68 @@ def test_activity_filters_by_administrator(
     mine = client.get(f"{API}/admin/activity?actor_id={admin.id}", headers=admin.headers).json()
     theirs = client.get(f"{API}/admin/activity?actor_id={bob.id}", headers=admin.headers).json()
     assert (mine["total"], theirs["total"]) == (1, 0)
+
+
+def test_actions_on_a_project_shared_with_the_admin_are_recorded(
+    client: TestClient,
+    admin: Person,
+    bob: Person,
+    project: dict[str, Any],
+    db_engine: Engine,
+) -> None:
+    # Bob can't share with the admin (it already has owner access): a share in the database.
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO project_shares (id, project_id, user_id, role) "
+                "VALUES (gen_random_uuid(), :project, :admin, 'editor')"
+            ),
+            {"project": project["id"], "admin": admin.id},
+        )
+    # An admin with a share is still an administrator acting on someone else's project.
+    client.patch(f"{API}/projects/{project['id']}", headers=admin.headers, json={"name": "T2"})
+    client.post(
+        f"{API}/projects/{project['id']}/sync", headers=admin.headers, json={"dry_run": True}
+    )
+    events = activity(client, admin)
+    assert [(e["action"], e["resource_name"]) for e in events] == [
+        ("dry run", "T2"),
+        ("update", "Main project"),
+    ]
+
+
+def test_actions_in_an_organization_the_admin_belongs_to_are_recorded(
+    client: TestClient, admin: Person, bob: Person
+) -> None:
+    org = create(client, "organizations", admin.headers, {"name": "Acme"})
+    git = create(
+        client,
+        "git-connections",
+        admin.headers,
+        git_payload(name="Acme repo", organization_id=org["id"]),
+    )
+    azure = create(
+        client,
+        "azure-connections",
+        admin.headers,
+        azure_payload(name="Acme board", organization_id=org["id"]),
+    )
+    project = create(
+        client,
+        "projects",
+        admin.headers,
+        {
+            "name": "Shop",
+            "organization_id": org["id"],
+            "git_connection_id": git["id"],
+            "azure_connection_id": azure["id"],
+        },
+    )
+    client.patch(f"{API}/projects/{project['id']}", headers=admin.headers, json={"name": "Shop 2"})
+    actions = [(e["action"], e["resource_type"]) for e in activity(client, admin)]
+    assert actions == [
+        ("update", "project"),
+        ("add a project to", "organization"),
+        ("add a connection to", "organization"),
+        ("add a connection to", "organization"),
+    ]

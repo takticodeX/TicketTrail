@@ -40,8 +40,9 @@ export function AdminActivityPage() {
       <div>
         <Title order={2}>Activity</Title>
         <Text c="dimmed" size="sm">
-          Everything an administrator changed, synced or deleted in other users' projects, connections and
-          organizations. Reading isn't recorded; actions that failed leave no entry.
+          Everything an administrator changed, synced or deleted in projects, connections and organizations that
+          aren't personally theirs, also when shared with them or in their organizations. Reading isn't recorded;
+          actions that failed leave no entry.
         </Text>
       </div>
       {activity.isPending && (

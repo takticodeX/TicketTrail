@@ -3,10 +3,12 @@
 No access at all answers 404, as if the resource didn't exist; access with too weak
 a role answers 403, since the user already knows the resource.
 
-Administrators of the instance may do everything. What they do to other users'
-resources (anything but reading) is recorded: an audit_events row, written in the
-same transaction as the action, and a line from the app.audit logger. Callers name
-the action (`action="update"`); without one, nothing is recorded.
+Administrators of the instance may do everything. What they do to anything that
+isn't personally theirs (anything but reading) is recorded, however they reach it:
+through being an administrator, a share or an organization. The record is an
+audit_events row, written in the same transaction as the action, and a line from the
+app.audit logger once committed. Callers name the action (`action="update"`);
+without one, nothing is recorded.
 """
 
 import logging
@@ -108,6 +110,11 @@ def owner_label(db: Session, item: OwnedModel) -> str:
     return owner.email if owner else "unknown"
 
 
+def audited(user: User, owner_id: uuid.UUID | None) -> bool:
+    """Whether an administrator's action on something owned by owner_id is recorded."""
+    return user.is_admin and owner_id != user.id
+
+
 def audit_project(db: Session, user: User, seen: SeenProject, action: str) -> None:
     audit(
         db,
@@ -134,7 +141,7 @@ def project_for(
         raise not_found("Project")
     if not seen.role.at_least(need):
         raise insufficient_role(need)
-    if seen.via_admin and action is not None:
+    if action is not None and audited(user, seen.project.owner_id):
         audit_project(db, user, seen, action)
     return seen
 
@@ -147,7 +154,7 @@ def run_for(
     if run is None:
         raise not_found("Run")
     seen = project_for(db, user, run.project_id)
-    if action is not None and seen.via_admin:
+    if action is not None and audited(user, seen.project.owner_id):
         kind = "dry run" if run.dry_run else "run"
         audit(
             db,
@@ -188,7 +195,7 @@ def organization_for(
         raise not_found("Organization")
     if admin and found[1] is not OrganizationRole.ADMIN:
         raise not_organization_admin()
-    if membership is None and action is not None:
+    if action is not None and user.is_admin:  # an organization is never personally theirs
         audit(
             db,
             user,
@@ -221,24 +228,22 @@ def connection_for[C: OwnedModel](
     connection = db.get(model, connection_id)
     if connection is None:
         raise not_found(what)
-    if connection.owner_id == user.id:
-        return connection
-    if connection.organization_id is not None:
-        found = OrganizationRepository(db, user.id).get(connection.organization_id)
-        if found is not None and (action is None or found[1] is OrganizationRole.ADMIN):
-            return connection
-        if found is not None and not user.is_admin:
+    if connection.owner_id != user.id and not user.is_admin:
+        found = None
+        if connection.organization_id is not None:
+            found = OrganizationRepository(db, user.id).get(connection.organization_id)
+        if found is None:
+            raise not_found(what)
+        if action is not None and found[1] is not OrganizationRole.ADMIN:
             raise not_organization_admin()
-    if user.is_admin:
-        if action is not None:
-            audit(
-                db,
-                user,
-                action,
-                resource_type=_RESOURCE_TYPES[what],
-                resource_id=connection.id,
-                resource_name=connection.name,
-                owner_label=owner_label(db, connection),
-            )
-        return connection
-    raise not_found(what)
+    if action is not None and audited(user, connection.owner_id):
+        audit(
+            db,
+            user,
+            action,
+            resource_type=_RESOURCE_TYPES[what],
+            resource_id=connection.id,
+            resource_name=connection.name,
+            owner_label=owner_label(db, connection),
+        )
+    return connection

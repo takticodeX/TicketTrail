@@ -185,10 +185,12 @@ An administrator sees and may do everything, on every project, connection and or
 - Your own Dashboard still shows only your projects, your organizations' and those shared
   with you.
 
-Whatever an administrator changes, syncs or deletes on someone else's project, connection
-or organization is recorded: **Admin → Activity** lists who did what, on what and whose,
+Whatever an administrator changes, syncs or deletes on anything that isn't personally
+theirs is recorded, however they reach it: as an administrator, through a share, or as a
+member of an organization. **Admin → Activity** lists who did what, on what and whose,
 newest first, and the API logs carry the same line (logger `app.audit`). Reading isn't
-recorded, and an action that failed leaves no entry.
+recorded, an administrator's own personal projects and connections aren't either, and an
+action that failed leaves no entry.
 
 Projects can also be given to another user, so nothing is lost when someone leaves:
 
@@ -340,8 +342,8 @@ To rotate `TT_JWT_SECRET`, change it and restart: everyone has to log in again.
 - Every user only sees their own connections and their organizations' connections, and
   the projects (with their runs) they own, see through an organization, or that are shared
   with them. Other projects answer 404. Shared users never see or use the owner's
-  connections directly. Administrators see everything, and their changes to other users'
-  data are recorded (Admin → Activity, and logger `app.audit`); tokens stay write-only for
+  connections directly. Administrators see everything, and their changes to anything not
+  personally theirs are recorded (Admin → Activity, and logger `app.audit`); tokens stay write-only for
   them too.
 - Credentials are passed to Git through the environment, never in URLs, Git config or
   command lines. Logs are JSON and mask Authorization headers, credentials in URLs and

@@ -223,7 +223,7 @@ def create_project(
     if body.organization_id is None:
         repo = ProjectRepository(db, user.id)
     else:
-        _, org_role = organization_for(db, user, body.organization_id)
+        _, org_role = organization_for(db, user, body.organization_id, action="add a project to")
         repo = ProjectRepository(db, organization_id=body.organization_id)
     if repo.name_taken(body.name):
         raise _name_taken(
