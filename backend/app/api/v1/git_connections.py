@@ -66,14 +66,17 @@ def _scope(
         return GitConnectionRepository(db, owner_id)
     if organization_id is None:
         return GitConnectionRepository(db, user.id)
-    organization_for(db, user, organization_id, admin=admin)
+    organization_for(
+        db, user, organization_id, admin=admin, action="add a connection to" if admin else None
+    )
     return GitConnectionRepository(db, organization_id=organization_id)
 
 
 def _get(
-    db: DbSession, user: CurrentUser, connection_id: uuid.UUID, *, write: bool = False
+    db: DbSession, user: CurrentUser, connection_id: uuid.UUID, *, action: str | None = None
 ) -> GitConnection:
-    return connection_for(db, user, GitConnection, connection_id, "Git connection", write=write)
+    """`action` (a change) needs an admin of an organization's connection; it is audited."""
+    return connection_for(db, user, GitConnection, connection_id, "Git connection", action=action)
 
 
 def _name_taken(*, organization: bool = False) -> AppError:
@@ -141,7 +144,7 @@ def update_git_connection(
     db: DbSession,
     box: SecretBoxDep,
 ) -> GitConnectionResponse:
-    connection = _get(db, user, connection_id, write=True)
+    connection = _get(db, user, connection_id, action="update")
     repo = GitConnectionRepository.owning(db, connection)
     sent = body.model_fields_set
     before = (connection.repo_url, connection.auth_type, connection.username, connection.secret_enc)
@@ -182,7 +185,7 @@ def update_git_connection(
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_git_connection(connection_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Response:
     """Refused (409) while a project uses the connection."""
-    connection = _get(db, user, connection_id, write=True)
+    connection = _get(db, user, connection_id, action="delete")
     in_use = ProjectRepository.owning(db, connection).names_using(git_connection_id=connection.id)
     if in_use:
         raise connection_in_use(in_use)

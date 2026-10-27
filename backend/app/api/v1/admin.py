@@ -24,6 +24,7 @@ from app.api.v1.schemas import (
     AdminUserResponse,
     AdminUserSummary,
     AdminUserUpdate,
+    AuditEventResponse,
     MemberResponse,
     OrganizationSummary,
     Page,
@@ -36,6 +37,7 @@ from app.api.v1.schemas import (
 )
 from app.core.errors import AppError, field_error, not_found
 from app.db.models import (
+    AuditEvent,
     AzureConnection,
     GitConnection,
     Organization,
@@ -425,6 +427,31 @@ def list_all_azure_connections(
             )
             for c in items
         ],
+        total=total,
+        page=page.page,
+        page_size=page.page_size,
+    )
+
+
+@router.get("/activity")
+def list_activity(
+    admin: AdminUser,
+    db: DbSession,
+    page: PageDep,
+    actor_id: Annotated[uuid.UUID | None, Query(description="Only this administrator")] = None,
+) -> Page[AuditEventResponse]:
+    """What administrators did to other users' data, newest first."""
+    query = select(AuditEvent)
+    if actor_id is not None:
+        query = query.where(AuditEvent.actor_id == actor_id)
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    events = db.scalars(
+        query.order_by(AuditEvent.created_at.desc(), AuditEvent.id)
+        .offset(page.offset)
+        .limit(page.page_size)
+    ).all()
+    return Page(
+        items=[AuditEventResponse.model_validate(e) for e in events],
         total=total,
         page=page.page,
         page_size=page.page_size,

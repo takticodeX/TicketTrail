@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { AppLayout } from './components/AppLayout';
 import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './components/RequireAuth';
+import { AdminActivityPage } from './pages/admin/AdminActivityPage';
 import { AdminConnectionsPage } from './pages/admin/AdminConnectionsPage';
 import { AdminOrganizationsPage } from './pages/admin/AdminOrganizationsPage';
 import { AdminProjectsPage } from './pages/admin/AdminProjectsPage';
@@ -77,6 +78,14 @@ export function AppRoutes() {
           element={
             <RequireAdmin fallback={<NotFoundPage />}>
               <AdminProjectsPage />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="admin/activity"
+          element={
+            <RequireAdmin fallback={<NotFoundPage />}>
+              <AdminActivityPage />
             </RequireAdmin>
           }
         />

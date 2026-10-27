@@ -90,6 +90,7 @@ Connections and projects belong to a user (`owner_id`) or to an organization (`o
 | `posted_comments` | `project_id`, `commit_sha`, `work_item_id`, `azure_comment_id`, status (pending \| posted), `posted_at` | **Unique (`project_id`, `commit_sha`, `work_item_id`)**: this is what guarantees a commit is never posted twice |
 | `project_cursors` | `project_id`, `branch`, `last_sha` | Where the last successful sync stopped on each branch |
 | `refresh_tokens` | `user_id`, `token_hash`, `expires_at`, `revoked`, `revoked_at` | Lets sessions be revoked. `revoked_at` gives a rotated token a short grace period (section 10) |
+| `audit_events` | `actor_id` (nullable), `actor_email`, `action` (e.g. `update`, `delete`, `sync`, `share`), `resource_type` (`project` \| `run` \| `git_connection` \| `azure_connection` \| `organization`), `resource_id`, `resource_name`, `owner_label` | What administrators did to other users' data. Names and owners are copied, so entries stay readable after the resource is gone |
 | `ownership_transfers` | `admin_id`, `from_user_id`, `to_user_id`, `project_id` (null when everything was moved), `projects_moved`, `connections_moved`, `connections_copied`, `summary` | Audit trail of the administrator's transfers |
 
 `posted_comments` is the source of truth for de-duplication. `project_cursors` is only an optimization so the app doesn't rescan the whole history. If the cursors are deleted, a full rescan still posts nothing twice. Deleting runs from the history never affects `posted_comments`.
@@ -119,7 +120,7 @@ Personal connections are private to their owner; an organization's connections a
 - Project names stay unique per owner, also when an editor renames a project.
 - Anyone a personal project is shared with can leave it. Removing someone from an organization (or their leaving it) also deletes their shares on its projects.
 - **Administrators of the instance may do everything.** They open any project with the owner role (a project response says `admin_access: true` when only that gives the access), read, test, change and delete any connection, and act as an admin of every organization. Secrets stay write-only for them too: they can replace a token, never read it. Their own project list (the dashboard) still holds only their own, their organizations' and their shared projects; everything else is reached from the admin pages.
-- Whatever an administrator does to another user's resources (anything but reading: changes, syncs, run deletions, shares, moves, deletions, organization management) is logged by the `app.audit` logger, with the administrator and the resource.
+- Whatever an administrator does to another user's resources (anything but reading: changes, syncs, run deletions, shares, moves, deletions, organization management) is recorded as an `audit_events` row in the same transaction as the action, and logged by the `app.audit` logger once committed. An action that fails leaves neither.
 - Administrators also transfer personal projects (section 8) and can make a member the admin of an organization left without one.
 
 **Organizations**
@@ -298,6 +299,7 @@ The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoin
 | POST | `/admin/projects/{id}/transfer` | Admin only: body `{to_user_id}`. Gives the project and its connections to an active user; a connection the previous owner still uses elsewhere is copied |
 | POST | `/admin/users/{id}/transfer` | Admin only: body `{to_user_id}`. Gives everything the user owns personally (projects and connections) to an active user; organizations' rows stay |
 | GET | `/admin/organizations` | Admin only: every organization with its members, admins and counts |
+| GET | `/admin/activity` | Admin only: the `audit_events`, newest first (`?actor_id=` to filter) |
 | GET | `/admin/git-connections` · `/admin/azure-connections` | Admin only: every connection with its owner (user or organization) and the number of projects using it. Secrets stay write-only |
 | POST | `/admin/organizations/{id}/admins` | Admin only: body `{user_id}`, a member who becomes an admin of the organization |
 | GET | `/admin/transfers` | Admin only: the transfer history, newest first |
@@ -323,6 +325,7 @@ The UI is a responsive single-page app with light and dark themes. Everything a 
 | Settings → Profile | `/settings/profile` | Display name, time zone, change password |
 | Admin → Users | `/admin/users` | Admins only: list users, turn accounts on or off, **Transfer all** of a user's projects and connections |
 | Admin → Projects | `/admin/projects` | Admins only: every project with its owner (a user or an organization), a link to open it with full rights, **Transfer** of personal projects to another user, and the transfer history |
+| Admin → Activity | `/admin/activity` | Admins only: what administrators did to other users' data (when, who, action, resource with a link while it exists, owner) |
 | Admin → Connections | `/admin/connections` | Admins only: every Git and Azure connection with its owner, to edit (and test), or delete |
 | Admin → Organizations | `/admin/organizations` | Admins only: every organization with its admins, a link to manage it as its admin; **Make admin** for a member |
 
@@ -516,6 +519,7 @@ Volumes: `pg_data` (database) and `repos_data` (Git clones). Only `frontend` pub
 - **S3 – Administrators see everything** *(done)*
   - *Build:* the owner role on every project and admin rights on every organization for administrators, any connection readable and changeable (secrets still write-only), `?owner_id=` on the connection lists, `/admin/git-connections` and `/admin/azure-connections`, the `app.audit` log, `admin_access` on projects; UI: projects and organizations open from the admin pages, Admin → Connections, the administrator banner on a project.
   - *Accept when:* an administrator syncs, edits, shares and deletes another user's project and edits or deletes their connections; their dashboard lists only their own projects; tokens never appear in any response; each such action is in the audit log; regular users still get 404.
+- **Activity page** *(done)*: `audit_events`, `GET /admin/activity` and Admin → Activity, replacing the logs as the place to read what administrators did.
 - Out of scope: instance-wide visibility for regular users, and public links.
 
 ## 13. Testing and definition of done
@@ -571,3 +575,4 @@ Decisions taken at the milestone gates, already reflected in the sections above.
 | M8/S1 | Project sharing (viewer / editor), administrator transfers | Projects survive a colleague leaving; teams can work on the same project |
 | M8/S2 | Organizations: members are viewers by default, raised to editor per project with a share | Least privilege by default; editing rights are given project by project |
 | M8/S3 | Administrators see and may do everything (replacing "administrators don't see users' data"); tokens stay write-only; their actions on others' data are logged | Nothing is out of an administrator's reach; secrets still never leave the server |
+| M8 | Admin → Activity: administrators' actions stored in `audit_events`, not only in the logs | The record survives log rotation and can be read in the UI |

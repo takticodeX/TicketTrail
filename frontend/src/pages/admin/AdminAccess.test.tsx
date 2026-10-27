@@ -3,12 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AdminAzureConnection, AdminGitConnection, AdminProject } from '../../api/admin';
+import type { AdminAzureConnection, AdminGitConnection, AdminProject, AuditEvent } from '../../api/admin';
 import type { Project } from '../../api/types';
 import { useAuth } from '../../hooks/useAuth';
 import { OWN_PROJECT, authValue, jsonResponse, mockFetch, renderWithProviders } from '../../test/utils';
 import { ProjectDetailPage } from '../ProjectDetailPage';
 import { ProjectWizardPage } from '../settings/ProjectWizardPage';
+import { AdminActivityPage } from './AdminActivityPage';
 import { AdminConnectionsPage } from './AdminConnectionsPage';
 import { AdminProjectsPage } from './AdminProjectsPage';
 
@@ -146,5 +147,36 @@ describe('administrator access', () => {
     expect(within(table).getByText('Acme')).toBeInTheDocument();
     await userEvent.click(within(table).getByRole('button', { name: "Edit Bob's repo" }));
     expect(await screen.findByRole('dialog', { name: 'Edit Git connection' })).toBeInTheDocument();
+  });
+});
+
+describe('AdminActivityPage', () => {
+  it('lists what administrators did, linking what still exists', async () => {
+    const event = (overrides: Partial<AuditEvent>): AuditEvent => ({
+      id: Math.random().toString(),
+      created_at: '2026-10-27T10:00:00Z',
+      actor_id: 'u1',
+      actor_email: 'alice@example.com',
+      action: 'update',
+      resource_type: 'project',
+      resource_id: 'p1',
+      resource_name: 'Billing',
+      owner_label: 'bob@example.com',
+      ...overrides,
+    });
+    mockFetch({
+      'GET /api/v1/admin/activity?page=1&page_size=50': () =>
+        page([
+          event({ action: 'delete', resource_id: 'p2', resource_name: 'Old' }),
+          event({}),
+          event({ resource_type: 'git_connection', resource_name: "Bob's repo" }),
+        ]),
+    });
+    renderWithProviders(<AdminActivityPage />);
+    const table = await screen.findByRole('table', { name: 'Activity' });
+    expect(within(table).getByRole('link', { name: 'Billing' })).toHaveAttribute('href', '/projects/p1');
+    expect(within(table).queryByRole('link', { name: 'Old' })).not.toBeInTheDocument();
+    expect(within(table).getByText("Bob's repo")).toBeInTheDocument();
+    expect(within(table).getAllByText('bob@example.com')).toHaveLength(3);
   });
 });

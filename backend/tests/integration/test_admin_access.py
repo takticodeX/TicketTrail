@@ -71,6 +71,12 @@ def bob_headers(client: TestClient) -> dict[str, str]:
     return bearer(login(client, "bob@example.com"))
 
 
+def activity(client: TestClient, admin: Person) -> list[dict[str, Any]]:
+    page = client.get(f"{API}/admin/activity", headers=admin.headers).json()
+    items: list[dict[str, Any]] = page["items"]
+    return items
+
+
 def audit_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.name == "app.audit"]
 
@@ -128,11 +134,19 @@ def test_admin_changes_syncs_and_deletes_someone_elses_project(
     assert client.delete(url, headers=admin.headers).status_code == 204
 
     lines = audit_lines(caplog)
-    assert any("editor action on project" in line for line in lines)
-    assert any("sync of project" in line for line in lines)
-    assert any("delete run" in line for line in lines)
-    assert any("owner action on project" in line for line in lines)
+    assert len(lines) == len(activity(client, admin))
     assert all("root@example.com" in line for line in lines)
+    # Newest first; the refused share left nothing.
+    assert [
+        (e["action"], e["resource_type"], e["resource_name"]) for e in activity(client, admin)
+    ] == [
+        ("delete", "project", "Renamed"),
+        ("delete", "run", "run of Renamed"),
+        ("sync", "project", "Renamed"),
+        ("update", "project", "Renamed"),
+        ("update", "project", "Main project"),
+    ]
+    assert {e["owner_label"] for e in activity(client, admin)} == {"bob@example.com"}
 
 
 def test_admin_manages_someone_elses_connections_without_seeing_secrets(
@@ -153,7 +167,13 @@ def test_admin_manages_someone_elses_connections_without_seeing_secrets(
     tested = client.post(f"{API}/azure-connections/{azure['id']}/test", headers=admin.headers)
     assert tested.json()["ok"] is True
     assert client.delete(url, headers=admin.headers).status_code == 204
-    assert any("change to git connection" in line for line in audit_lines(caplog))
+    assert [
+        (e["action"], e["resource_type"], e["resource_name"]) for e in activity(client, admin)
+    ] == [
+        ("delete", "git_connection", "Renamed"),
+        ("update", "git_connection", "App repo"),
+    ]
+    assert len(audit_lines(caplog)) == 2
 
 
 def test_only_admins_list_another_users_connections(
@@ -224,3 +244,46 @@ def test_sharing_with_an_admin_is_pointless(
 def test_a_regular_user_still_gets_404(client: TestClient, bob: Person, admin: Person) -> None:
     mine = create_project(client, admin.headers)
     assert client.get(f"{API}/projects/{mine['id']}", headers=bob.headers).status_code == 404
+
+
+def test_organization_actions_are_recorded(
+    client: TestClient, admin: Person, bob: Person, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="app.audit")
+    org = create(client, "organizations", bob.headers, {"name": "Acme"})
+    url = f"{API}/organizations/{org['id']}"
+    client.get(url, headers=admin.headers)  # reading: not recorded
+    client.patch(url, headers=admin.headers, json={"timezone": "UTC"})
+    client.post(
+        f"{API}/git-connections",
+        headers=admin.headers,
+        json=git_payload(name="Acme repo", organization_id=org["id"]),
+    )
+    events = activity(client, admin)
+    assert [(e["action"], e["resource_type"], e["owner_label"]) for e in events] == [
+        ("add a connection to", "organization", "organization Acme"),
+        ("update", "organization", "organization Acme"),
+    ]
+    assert len(audit_lines(caplog)) == 2
+
+
+def test_nothing_is_recorded_for_regular_users_or_own_data(
+    client: TestClient, admin: Person, bob: Person, project: dict[str, Any]
+) -> None:
+    client.patch(f"{API}/projects/{project['id']}", headers=bob.headers, json={"name": "Mine"})
+    mine = create_project(client, admin.headers, name="Admin's own")
+    client.patch(f"{API}/projects/{mine['id']}", headers=admin.headers, json={"name": "Still mine"})
+    assert activity(client, admin) == []
+
+
+def test_only_admins_read_the_activity(client: TestClient, admin: Person, bob: Person) -> None:
+    assert client.get(f"{API}/admin/activity", headers=bob.headers).status_code == 403
+
+
+def test_activity_filters_by_administrator(
+    client: TestClient, admin: Person, bob: Person, project: dict[str, Any]
+) -> None:
+    client.patch(f"{API}/projects/{project['id']}", headers=admin.headers, json={"name": "X"})
+    mine = client.get(f"{API}/admin/activity?actor_id={admin.id}", headers=admin.headers).json()
+    theirs = client.get(f"{API}/admin/activity?actor_id={bob.id}", headers=admin.headers).json()
+    assert (mine["total"], theirs["total"]) == (1, 0)

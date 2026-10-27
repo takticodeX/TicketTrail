@@ -33,7 +33,7 @@ def add_share(
     project_id: uuid.UUID, body: ShareCreate, user: CurrentUser, db: DbSession
 ) -> ShareResponse:
     """Share with a registered user, found by their exact email."""
-    project_for(db, user, project_id, ProjectRole.OWNER)
+    project_for(db, user, project_id, ProjectRole.OWNER, action="share")
     target = UserRepository(db).get_by_email(body.email)
     if target is None or not target.is_active:
         # The same answer for unknown and turned-off accounts: no directory of users.
@@ -64,7 +64,7 @@ def _share_or_404(db: DbSession, project_id: uuid.UUID, user_id: uuid.UUID) -> P
 def update_share(
     project_id: uuid.UUID, user_id: uuid.UUID, body: ShareUpdate, user: CurrentUser, db: DbSession
 ) -> ShareResponse:
-    project_for(db, user, project_id, ProjectRole.OWNER)
+    project_for(db, user, project_id, ProjectRole.OWNER, action="change a share on")
     share = _share_or_404(db, project_id, user_id)
     share.role = body.role
     db.commit()
@@ -79,8 +79,13 @@ def remove_share(
     project_id: uuid.UUID, user_id: uuid.UUID, user: CurrentUser, db: DbSession
 ) -> Response:
     """The owner removes anyone; a user can also leave a project shared with them."""
+    leaving = user_id == user.id
     project_for(
-        db, user, project_id, ProjectRole.VIEWER if user_id == user.id else ProjectRole.OWNER
+        db,
+        user,
+        project_id,
+        ProjectRole.VIEWER if leaving else ProjectRole.OWNER,
+        action=None if leaving else "remove a share from",
     )
     ProjectShareRepository(db, project_id).delete(_share_or_404(db, project_id, user_id))
     db.commit()

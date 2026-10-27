@@ -130,7 +130,7 @@ def update_organization(
     organization_id: uuid.UUID, body: OrganizationUpdate, user: CurrentUser, db: DbSession
 ) -> OrganizationResponse:
     """Admins rename it or change the time zone its schedules run in."""
-    org, role = organization_for(db, user, organization_id, admin=True)
+    org, role = organization_for(db, user, organization_id, admin=True, action="update")
     if body.name is not None and body.name != org.name:
         if organization_name_taken(db, body.name, exclude_id=org.id):
             raise _name_taken()
@@ -145,7 +145,7 @@ def update_organization(
 @router.delete("/{organization_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_organization(organization_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Response:
     """Admins only, and only once it owns no projects and no connections."""
-    org, _ = organization_for(db, user, organization_id, admin=True)
+    org, _ = organization_for(db, user, organization_id, admin=True, action="delete")
     projects, connections = owned_counts(db, org.id)
     if projects or connections:
         raise AppError(
@@ -173,7 +173,7 @@ def add_member(
     organization_id: uuid.UUID, body: MemberCreate, user: CurrentUser, db: DbSession
 ) -> MemberResponse:
     """Admins add a registered user, found by their exact email."""
-    organization_for(db, user, organization_id, admin=True)
+    organization_for(db, user, organization_id, admin=True, action="add a member to")
     target = UserRepository(db).get_by_email(body.email)
     if target is None or not target.is_active:
         raise AppError(404, "user_not_found", "No user with this email.")
@@ -203,7 +203,7 @@ def update_member(
     user: CurrentUser,
     db: DbSession,
 ) -> MemberResponse:
-    organization_for(db, user, organization_id, admin=True)
+    organization_for(db, user, organization_id, admin=True, action="change a member of")
     member = _member_or_404(db, organization_id, user_id)
     repo = MemberRepository(db, organization_id)
     if (
@@ -229,8 +229,11 @@ def remove_member(
     A removed member also loses the shares they had on the organization's projects:
     this is how access ends when someone leaves.
     """
-    _, role = organization_for(db, user, organization_id)
-    if user_id != user.id and role is not OrganizationRole.ADMIN:
+    leaving = user_id == user.id
+    _, role = organization_for(
+        db, user, organization_id, action=None if leaving else "remove a member from"
+    )
+    if not leaving and role is not OrganizationRole.ADMIN:
         raise not_organization_admin()
     member = _member_or_404(db, organization_id, user_id)
     repo = MemberRepository(db, organization_id)

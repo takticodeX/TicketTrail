@@ -4,7 +4,13 @@ from app.db.models.connections import AzureConnection, GitAuthType, GitConnectio
 from app.db.models.organization import Organization, OrganizationMember, OrganizationRole
 from app.db.models.project import Project
 from app.db.models.refresh_token import RefreshToken
-from app.db.models.sharing import SHARE_ROLES, OwnershipTransfer, ProjectRole, ProjectShare
+from app.db.models.sharing import (
+    SHARE_ROLES,
+    AuditEvent,
+    OwnershipTransfer,
+    ProjectRole,
+    ProjectShare,
+)
 from app.db.models.sync import (
     ACTIVE_STATUSES,
     CommentStatus,
@@ -21,6 +27,7 @@ from app.db.models.user import User, UserRole
 __all__ = [
     "ACTIVE_STATUSES",
     "SHARE_ROLES",
+    "AuditEvent",
     "AzureConnection",
     "CommentStatus",
     "GitAuthType",

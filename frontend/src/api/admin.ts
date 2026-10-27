@@ -98,5 +98,23 @@ export const listAllGitConnections = (page: number, pageSize = 100) =>
 export const listAllAzureConnections = (page: number, pageSize = 100) =>
   apiRequest<Page<AdminAzureConnection>>(`/admin/azure-connections?page=${page}&page_size=${pageSize}`);
 
+/** An administrator's action on someone else's data. */
+export interface AuditEvent {
+  id: string;
+  created_at: string;
+  actor_id: string | null;
+  actor_email: string;
+  /** A verb such as "update", "delete", "sync" or "share". */
+  action: string;
+  resource_type: 'project' | 'run' | 'git_connection' | 'azure_connection' | 'organization';
+  resource_id: string | null;
+  resource_name: string;
+  /** Whose it is: an email, or "organization <name>". */
+  owner_label: string;
+}
+
+export const listActivity = (page: number, pageSize = 50) =>
+  apiRequest<Page<AuditEvent>>(`/admin/activity?page=${page}&page_size=${pageSize}`);
+
 export const listTransfers = (page: number, pageSize = 20) =>
   apiRequest<Page<OwnershipTransfer>>(`/admin/transfers?page=${page}&page_size=${pageSize}`);

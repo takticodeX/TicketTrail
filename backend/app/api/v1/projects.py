@@ -266,7 +266,7 @@ def update_project(
     settings: SettingsDep,
 ) -> ProjectResponse:
     """Editors change everything but the connections, which belong to the owner."""
-    seen = project_for(db, user, project_id, ProjectRole.EDITOR)
+    seen = project_for(db, user, project_id, ProjectRole.EDITOR, action="update")
     project = seen.project
     sent = body.model_fields_set
     nullable = {"start_from", "schedule_cron"}
@@ -300,7 +300,7 @@ def update_project(
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_project(project_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Response:
-    project = project_for(db, user, project_id, ProjectRole.OWNER).project
+    project = project_for(db, user, project_id, ProjectRole.OWNER, action="delete").project
     ProjectRepository.owning(db, project).delete(project)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -318,7 +318,7 @@ def move(
 
     The connections come along; one the previous owner still uses elsewhere is copied.
     """
-    seen = project_for(db, user, project_id, ProjectRole.OWNER)
+    seen = project_for(db, user, project_id, ProjectRole.OWNER, action="move")
     project = seen.project
     if body.organization_id is not None:
         if seen.owner is None:

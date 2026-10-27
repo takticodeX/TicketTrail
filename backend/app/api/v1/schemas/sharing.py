@@ -88,3 +88,19 @@ class AdminGitConnectionResponse(GitConnectionResponse, AdminConnectionOwner):
 
 class AdminAzureConnectionResponse(AzureConnectionResponse, AdminConnectionOwner):
     pass
+
+
+class AuditEventResponse(BaseModel):
+    """An administrator's action on someone else's data."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    created_at: datetime
+    actor_id: uuid.UUID | None
+    actor_email: str
+    action: str = Field(description='A verb such as "update", "delete", "sync" or "share"')
+    resource_type: Literal["project", "run", "git_connection", "azure_connection", "organization"]
+    resource_id: uuid.UUID | None
+    resource_name: str
+    owner_label: str = Field(description="Whose it is: an email, or an organization")

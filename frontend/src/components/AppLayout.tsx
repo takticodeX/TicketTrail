@@ -115,6 +115,13 @@ export function AppLayout() {
             />
             <NavLink
               component={Link}
+              to="/admin/activity"
+              label="Activity"
+              active={pathname.startsWith('/admin/activity')}
+              onClick={close}
+            />
+            <NavLink
+              component={Link}
               to="/admin/connections"
               label="Connections"
               active={pathname.startsWith('/admin/connections')}

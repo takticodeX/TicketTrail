@@ -1,7 +1,7 @@
 import uuid
 from enum import StrEnum
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import TimestampedModel
@@ -63,3 +63,24 @@ class OwnershipTransfer(TimestampedModel):
     connections_copied: Mapped[int] = mapped_column(Integer)
     # Human-readable summary (names, renames), readable even after the users change.
     summary: Mapped[str] = mapped_column(Text)
+
+
+class AuditEvent(TimestampedModel):
+    """What an administrator did to someone else's project, run, connection or organization.
+
+    Names and owners are copied, so an event stays readable after the resource is gone.
+    """
+
+    __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_events_created_at", "created_at"),)
+
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    actor_email: Mapped[str] = mapped_column(String(320))
+    # A verb such as "update", "delete", "sync" or "share".
+    action: Mapped[str] = mapped_column(String(64))
+    # "project", "run", "git_connection", "azure_connection" or "organization".
+    resource_type: Mapped[str] = mapped_column(String(32))
+    resource_id: Mapped[uuid.UUID | None]
+    resource_name: Mapped[str] = mapped_column(String(200))
+    # Whose it is: the owner's email, or the organization's name.
+    owner_label: Mapped[str] = mapped_column(String(320))

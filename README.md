@@ -186,7 +186,9 @@ An administrator sees and may do everything, on every project, connection and or
   with you.
 
 Whatever an administrator changes, syncs or deletes on someone else's project, connection
-or organization is recorded in the API logs (logger `app.audit`), with who and what.
+or organization is recorded: **Admin → Activity** lists who did what, on what and whose,
+newest first, and the API logs carry the same line (logger `app.audit`). Reading isn't
+recorded, and an action that failed leaves no entry.
 
 Projects can also be given to another user, so nothing is lost when someone leaves:
 
@@ -339,7 +341,8 @@ To rotate `TT_JWT_SECRET`, change it and restart: everyone has to log in again.
   the projects (with their runs) they own, see through an organization, or that are shared
   with them. Other projects answer 404. Shared users never see or use the owner's
   connections directly. Administrators see everything, and their changes to other users'
-  data are logged (logger `app.audit`); tokens stay write-only for them too.
+  data are recorded (Admin → Activity, and logger `app.audit`); tokens stay write-only for
+  them too.
 - Credentials are passed to Git through the environment, never in URLs, Git config or
   command lines. Logs are JSON and mask Authorization headers, credentials in URLs and
   secret fields.
