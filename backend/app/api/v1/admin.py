@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from app.api.deps import AdminUser, DbSession, PageDep
 from app.api.v1.azure_connections import to_response as azure_response
 from app.api.v1.git_connections import to_response as git_response
+from app.api.v1.owner_changes import transfer_responses
 from app.api.v1.schemas import (
     AdminAzureConnectionResponse,
     AdminGitConnectionResponse,
@@ -54,7 +55,7 @@ from app.db.repositories import (
     owned_counts,
     project_summaries,
 )
-from app.db.repositories.transfers import owns_anything, transfer_everything, transfer_project
+from app.db.repositories.transfers import owns_anything, transfer_everything
 
 logger = logging.getLogger(__name__)
 
@@ -179,67 +180,11 @@ def _recipient(db: DbSession, body: TransferRequest, previous: User) -> User:
     return to
 
 
-def _transfer_responses(
-    db: DbSession, transfers: Sequence[OwnershipTransfer]
-) -> list[TransferResponse]:
-    ids = {u for t in transfers for u in (t.admin_id, t.from_user_id, t.to_user_id) if u}
-    users = {u.id: u for u in db.scalars(select(User).where(User.id.in_(ids)))}
-
-    def summary(user_id: uuid.UUID | None) -> UserSummary | None:
-        user = users.get(user_id) if user_id else None
-        return UserSummary.model_validate(user) if user else None
-
-    return [
-        TransferResponse(
-            id=t.id,
-            created_at=t.created_at,
-            admin=summary(t.admin_id),
-            from_user=summary(t.from_user_id),
-            to_user=summary(t.to_user_id),
-            project_id=t.project_id,
-            projects_moved=t.projects_moved,
-            connections_moved=t.connections_moved,
-            connections_copied=t.connections_copied,
-            summary=t.summary,
-        )
-        for t in transfers
-    ]
-
-
 def _done(db: DbSession, transfer: OwnershipTransfer) -> TransferResponse:
     db.commit()
     db.refresh(transfer)
-    logger.info(
-        "Admin %s transferred %s project(s) from user %s to user %s",
-        transfer.admin_id,
-        transfer.projects_moved,
-        transfer.from_user_id,
-        transfer.to_user_id,
-    )
-    return _transfer_responses(db, [transfer])[0]
-
-
-@router.post("/projects/{project_id}/transfer")
-def transfer_one_project(
-    project_id: uuid.UUID, body: TransferRequest, admin: AdminUser, db: DbSession
-) -> TransferResponse:
-    """Give a personal project and its connections to another user (copied if still in use).
-
-    An organization's project is not the administrator's to move: its admins move it.
-    """
-    project = db.get(Project, project_id)
-    if project is None:
-        raise not_found("Project")
-    if project.owner_id is None:
-        raise AppError(
-            409,
-            "organization_project",
-            "This project belongs to an organization. Its admins can move it to a member.",
-        )
-    previous = db.get(User, project.owner_id)
-    assert previous is not None  # noqa: S101  (the owner's foreign key)
-    to = _recipient(db, body, previous)
-    return _done(db, transfer_project(db, admin=admin, project=project, previous=previous, to=to))
+    logger.info("Admin %s: %s", transfer.actor_id, transfer.summary)
+    return transfer_responses(db, [transfer])[0]
 
 
 @router.post("/users/{user_id}/transfer")
@@ -253,7 +198,7 @@ def transfer_all(
     to = _recipient(db, body, previous)
     if not owns_anything(db, previous.id):
         raise AppError(409, "nothing_to_transfer", "This user owns no projects or connections.")
-    return _done(db, transfer_everything(db, admin=admin, previous=previous, to=to))
+    return _done(db, transfer_everything(db, actor=admin, previous=previous, to=to))
 
 
 @router.get("/transfers")
@@ -267,7 +212,7 @@ def list_transfers(admin: AdminUser, db: DbSession, page: PageDep) -> Page[Trans
         .limit(page.page_size)
     ).all()
     return Page(
-        items=_transfer_responses(db, transfers),
+        items=transfer_responses(db, transfers),
         total=total,
         page=page.page,
         page_size=page.page_size,

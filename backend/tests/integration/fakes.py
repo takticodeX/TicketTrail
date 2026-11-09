@@ -7,6 +7,7 @@ from app.worker import task_names
 from app.worker.connection_checks import run_azure_connection_check, run_git_connection_check
 from app.worker.context import WorkerContext
 from app.worker.runner import WorkerUnavailableError
+from app.worker.work_items import run_work_item_search
 
 _TASKS: dict[str, Callable[[WorkerContext, uuid.UUID], dict[str, Any]]] = {
     task_names.TEST_GIT_CONNECTION: run_git_connection_check,
@@ -28,6 +29,9 @@ class InProcessTaskRunner:
         self.calls.append((name, args))
         if self.unavailable:
             raise WorkerUnavailableError("no worker answered in time")
+        if name == task_names.SEARCH_WORK_ITEMS:
+            project_id, text = args
+            return run_work_item_search(self.context, uuid.UUID(project_id), text)
         (connection_id,) = args
         return _TASKS[name](self.context, uuid.UUID(connection_id))
 

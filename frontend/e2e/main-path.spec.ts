@@ -2,7 +2,8 @@ import { expect, request, test, type Page } from '@playwright/test';
 
 /**
  * The main path (spec section 13): register -> create both connections -> create a
- * project -> dry run -> real sync (Azure faked by the fixtures server) -> history,
+ * project -> dry run -> review (deselect a commit) and post the selection (Azure faked
+ * by the fixtures server) -> history -> a later sync respects the review,
  * then sharing the project with a viewer and moving it into an organization.
  */
 
@@ -83,17 +84,17 @@ test('register, connect, dry run, sync and see the history', async ({ page }) =>
   const fixtures = await request.newContext({ baseURL: FIXTURES, ignoreHTTPSErrors: true });
   expect(await (await fixtures.get('/__fake__/comments')).json()).toEqual({});
 
-  // Real sync, after the confirmation with the dry run's numbers.
-  await page.getByRole('link', { name: /Demo/ }).first().click();
-  await page.getByRole('button', { name: 'Sync now' }).click();
-  await expect(page.getByText('3 comments')).toBeVisible();
-  await page.getByRole('button', { name: 'Post comments' }).click();
+  // Review: deselect the commit for #3 (never posted), then post the selection.
+  await page.getByRole('checkbox', { name: /to #3$/ }).click();
+  await expect(page.getByRole('button', { name: 'Post selected (2)' })).toBeVisible();
+  await page.getByRole('button', { name: 'Post selected (2)' }).click();
+  await page.getByRole('dialog', { name: 'Post the selected commits?' }).getByRole('button', { name: 'Post selected' }).click();
   await expect(page.getByRole('heading', { name: 'Sync' })).toBeVisible();
   await expect(page.getByText('Success')).toBeVisible();
-  await expect(page.getByText('Posted (3)', { exact: true })).toBeVisible();
+  await expect(page.getByText('Posted (2)', { exact: true })).toBeVisible();
 
   const posted = (await (await fixtures.get('/__fake__/comments')).json()) as Record<string, { text: string }[]>;
-  expect(Object.keys(posted).sort()).toEqual(['1', '2', '3']);
+  expect(Object.keys(posted).sort()).toEqual(['1', '2']);
   expect(posted['1']?.[0]?.text).toContain('Fix login redirect AB#1');
   expect(posted['1']?.[0]?.text).toMatch(/tt:[0-9a-f]{40}/);
 
@@ -101,17 +102,18 @@ test('register, connect, dry run, sync and see the history', async ({ page }) =>
   await page.getByRole('link', { name: /Demo/ }).first().click();
   await expect(page.getByRole('cell', { name: 'Success' })).toHaveCount(2);
   await page.goto('/');
-  await expect(page.getByText('3 comments posted')).toBeVisible();
+  await expect(page.getByText('2 comments posted')).toBeVisible();
 
-  // Syncing again posts nothing new.
+  // Syncing again posts nothing new, and never the deselected commit.
   await page.getByRole('link', { name: 'Demo', exact: true }).click();
   const projectUrl = page.url();
   await page.getByRole('button', { name: 'Sync now' }).click();
   await page.getByRole('button', { name: 'Post comments' }).click();
   await page.waitForURL((url) => url.href !== projectUrl && url.pathname.includes('/runs/'));
   await expect(page.getByText('Success', { exact: true })).toBeVisible();
+  await expect(page.getByText('Deselected (1)', { exact: true })).toBeVisible();
   const again = (await (await fixtures.get('/__fake__/comments')).json()) as Record<string, unknown[]>;
-  expect(Object.values(again).map((c) => c.length)).toEqual([1, 1, 1]);
+  expect(Object.values(again).map((c) => c.length)).toEqual([1, 1]);
 
   // Share the project with a second user, as a viewer.
   const api = await request.newContext({ baseURL: test.info().project.use.baseURL });
@@ -140,11 +142,11 @@ test('register, connect, dry run, sync and see the history', async ({ page }) =>
   await expect(page.getByRole('table', { name: 'Members' }).getByText(viewerEmail)).toBeVisible();
   await page.goto('/');
   await page.getByRole('link', { name: 'Demo', exact: true }).click();
-  await page.getByRole('button', { name: 'Move to an organization' }).click();
-  const move = page.getByRole('dialog', { name: 'Move to an organization' });
+  await page.getByRole('button', { name: 'Change owner' }).click();
+  const move = page.getByRole('dialog', { name: 'Change the owner of "Demo"' });
   await move.getByRole('textbox', { name: 'Organization' }).click();
   await page.getByRole('option', { name: orgName }).click();
-  await move.getByRole('button', { name: 'Move' }).click();
+  await move.getByRole('button', { name: 'Change owner' }).click();
   await expect(page.getByText(`${orgName} · shared with 1`)).toBeVisible();
 
   // The viewer sees it in the organization's section, can dry run, can't sync.
@@ -162,6 +164,6 @@ test('register, connect, dry run, sync and see the history', async ({ page }) =>
   await expect(page.getByText('Success', { exact: true })).toBeVisible();
   await expect(page.getByText(/by Victor/)).toBeVisible();
   const afterViewer = (await (await fixtures.get('/__fake__/comments')).json()) as Record<string, unknown[]>;
-  expect(Object.values(afterViewer).map((c) => c.length)).toEqual([1, 1, 1]);
+  expect(Object.values(afterViewer).map((c) => c.length)).toEqual([1, 1]);
   await fixtures.dispose();
 });

@@ -45,6 +45,9 @@ class RunResponse(BaseModel):
     triggered_by: UserSummary | None = Field(
         default=None, description="Who started a manual run; null for scheduled runs"
     )
+    source_run_id: uuid.UUID | None = Field(
+        default=None, description="For a Post selected run: the reviewed dry run it posts"
+    )
 
 
 class RunDetailResponse(RunResponse):
@@ -63,3 +66,4 @@ class RunItemResponse(BaseModel):
     work_item_id: int | None
     action: ItemAction
     detail: str | None
+    manual: bool = Field(default=False, description="The work item was linked by hand")

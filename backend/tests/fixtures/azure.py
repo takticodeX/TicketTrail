@@ -29,6 +29,9 @@ class FakeAzure:
     # Called after a comment is stored, before the response returns (to simulate crashes).
     after_post: Callable[[int, str], None] | None = None
     posts: int = 0
+    # Title, type and state per work item, for the picker's search (defaults otherwise).
+    details: dict[int, tuple[str, str, str]] = field(default_factory=dict)
+    wiql_queries: list[str] = field(default_factory=list)
     _ids: int = 1000
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -47,8 +50,36 @@ class FakeAzure:
         if self.next_reads:
             return self.next_reads.pop(0)
         ids = [int(i) for i in request.url.params["ids"].split(",")]
-        value = [{"id": i, "fields": {}} if i in self.work_items else None for i in ids]
+        value = [
+            {"id": i, "fields": self._fields(i)} if i in self.work_items else None for i in ids
+        ]
         return httpx.Response(200, json={"count": len(value), "value": value})
+
+    def _fields(self, work_item_id: int) -> dict[str, object]:
+        title, kind, state = self.details.get(
+            work_item_id, (f"Work item {work_item_id}", "Task", "Active")
+        )
+        return {
+            "System.Id": work_item_id,
+            "System.Title": title,
+            "System.WorkItemType": kind,
+            "System.State": state,
+        }
+
+    def _wiql(self, request: httpx.Request) -> httpx.Response:
+        """Enough of WIQL for the search: [System.Id] = n and [System.Title] CONTAINS 'x'."""
+        query = json.loads(request.content)["query"]
+        self.wiql_queries.append(query)
+        text = re.search(r"CONTAINS '((?:[^']|'')*)'", query)
+        number = re.search(r"\[System\.Id\] = (\d+)", query)
+        matches = []
+        for work_item_id in sorted(self.work_items, reverse=True):  # "most recently changed"
+            title = str(self._fields(work_item_id)["System.Title"])
+            by_text = text is not None and text.group(1).replace("''", "'").lower() in title.lower()
+            by_number = number is not None and int(number.group(1)) == work_item_id
+            if (text is None and number is None) or by_text or by_number:
+                matches.append({"id": work_item_id})
+        return httpx.Response(200, json={"workItems": matches})
 
     def _post_comment(self, request: httpx.Request) -> httpx.Response:
         match = _COMMENTS.match(str(request.url).split("?")[0])
@@ -89,6 +120,7 @@ def fake_azure() -> Iterator[FakeAzure]:
             return_value=httpx.Response(200, json={"id": "p", "name": PROJECT})
         )
         router.get(f"{ORG}/{PROJECT}/_apis/wit/workitems").mock(side_effect=azure._work_items)
+        router.post(f"{ORG}/{PROJECT}/_apis/wit/wiql").mock(side_effect=azure._wiql)
         router.post(url__regex=_COMMENTS.pattern).mock(side_effect=azure._post_comment)
         router.get(url__regex=_COMMENTS.pattern).mock(side_effect=azure._list_comments)
         yield azure

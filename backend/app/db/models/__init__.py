@@ -14,6 +14,8 @@ from app.db.models.sharing import (
 from app.db.models.sync import (
     ACTIVE_STATUSES,
     CommentStatus,
+    CommitExclusion,
+    CommitLink,
     ItemAction,
     PostedComment,
     ProjectCursor,
@@ -30,6 +32,8 @@ __all__ = [
     "AuditEvent",
     "AzureConnection",
     "CommentStatus",
+    "CommitExclusion",
+    "CommitLink",
     "GitAuthType",
     "GitConnection",
     "ItemAction",

@@ -43,16 +43,23 @@ class ProjectShare(TimestampedModel):
 
 
 class OwnershipTransfer(TimestampedModel):
-    """Audit trail of what an administrator moved from one user to another."""
+    """History of owner changes: who gave what to whom (a user or an organization)."""
 
     __tablename__ = "ownership_transfers"
 
-    admin_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    # Who changed the owner: the project's owner, an organization admin or an administrator.
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     from_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
+    from_organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="SET NULL")
+    )
     to_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
+    )
+    to_organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="SET NULL")
     )
     # Null when everything the user owned was moved.
     project_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -61,7 +68,7 @@ class OwnershipTransfer(TimestampedModel):
     projects_moved: Mapped[int] = mapped_column(Integer)
     connections_moved: Mapped[int] = mapped_column(Integer)
     connections_copied: Mapped[int] = mapped_column(Integer)
-    # Human-readable summary (names, renames), readable even after the users change.
+    # Human-readable summary (names, renames), readable even after the owners change.
     summary: Mapped[str] = mapped_column(Text)
 
 

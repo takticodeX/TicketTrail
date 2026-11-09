@@ -58,13 +58,14 @@ export const useUpdateMember = (id: string) =>
 export const useRemoveMember = (id: string) =>
   useOrganizationMutation((userId: string) => api.removeMember(id, userId));
 
-export function useMoveProject(projectId: string) {
+export function useChangeOwner(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (target: { organization_id: string } | { to_user_id: string }) =>
-      api.moveProject(projectId, target),
+      api.changeOwner(projectId, target),
     onSuccess: () => {
-      for (const key of [settingsKeys.projects, settingsKeys.git, settingsKeys.azure, organizationKeys.all]) {
+      const keys = [settingsKeys.projects, settingsKeys.git, settingsKeys.azure, organizationKeys.all];
+      for (const key of [...keys, ['admin-projects'], ['admin-transfers']]) {
         void queryClient.invalidateQueries({ queryKey: key });
       }
     },

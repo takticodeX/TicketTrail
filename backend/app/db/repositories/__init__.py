@@ -21,6 +21,7 @@ from app.db.repositories.owned import (
     ProjectRepository,
 )
 from app.db.repositories.refresh_tokens import RefreshTokenRepository
+from app.db.repositories.review import ReviewRepository
 from app.db.repositories.sync import (
     CursorRepository,
     PostedCommentRepository,
@@ -44,6 +45,7 @@ __all__ = [
     "ProjectScope",
     "ProjectShareRepository",
     "RefreshTokenRepository",
+    "ReviewRepository",
     "SeenProject",
     "SyncRunRepository",
     "UserRepository",

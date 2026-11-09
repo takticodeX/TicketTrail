@@ -27,6 +27,15 @@ class TrackerComment:
     text: str
 
 
+@dataclass(frozen=True)
+class TrackerWorkItem:
+    id: int
+    title: str
+    type: str
+    state: str
+    closed: bool
+
+
 class WorkItemTracker(Protocol):
     def test_connection(self) -> str:
         """Check credentials and project access; return the project's display name."""
@@ -41,3 +50,7 @@ class WorkItemTracker(Protocol):
         ...
 
     def list_comments(self, work_item_id: int) -> list[TrackerComment]: ...
+
+    def search_work_items(self, text: str, *, limit: int) -> list[TrackerWorkItem]:
+        """Work items whose title contains `text` (or with that ID), open ones first."""
+        ...

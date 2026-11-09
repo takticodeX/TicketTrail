@@ -11,6 +11,7 @@ from app.api.v1 import (
     me,
     organizations,
     projects,
+    review,
     runs,
     sharing,
 )
@@ -66,6 +67,14 @@ api_router.include_router(
     responses={
         **_RESOURCE_ERRORS,
         403: {"model": ErrorResponse, "description": "Not an administrator"},
+    },
+)
+api_router.include_router(
+    review.router,
+    responses={
+        **_RESOURCE_ERRORS,
+        403: {"model": ErrorResponse, "description": "Only an editor of the project"},
+        503: {"model": ErrorResponse, "description": "The worker did not answer"},
     },
 )
 api_router.include_router(

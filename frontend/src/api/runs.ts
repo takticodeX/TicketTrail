@@ -1,5 +1,5 @@
 import { apiRequest } from './client';
-import type { ItemAction, Page, SyncRun, SyncRunDetail, SyncRunItem } from './types';
+import type { ItemAction, Page, SyncRun, SyncRunDetail, SyncRunItem, WorkItemSearchResult } from './types';
 
 export const startSync = (projectId: string, dryRun: boolean) =>
   apiRequest<{ run_id: string }>(`/projects/${projectId}/sync`, {
@@ -29,3 +29,29 @@ export const listRunItems = (runId: string, page: number, action: ItemAction | n
   if (action) params.set('action', action);
   return apiRequest<Page<SyncRunItem>>(`/runs/${runId}/items?${params.toString()}`);
 };
+
+// --- Reviewing a dry run ----------------------------------------------------------------------
+
+/** Work items of the project's board: open first, closed last. */
+export const searchWorkItems = (projectId: string, query: string, signal?: AbortSignal) =>
+  apiRequest<WorkItemSearchResult>(
+    `/projects/${projectId}/work-items?${new URLSearchParams({ q: query }).toString()}`,
+    { signal },
+  );
+
+/** Post a dry-run row to this work item; the commit stays linked to it from now on. */
+export const setItemWorkItem = (runId: string, itemId: string, workItemId: number) =>
+  apiRequest<SyncRunItem>(`/runs/${runId}/items/${itemId}/work-item`, {
+    method: 'PUT',
+    body: { work_item_id: workItemId },
+  });
+
+/** Deselect a row for good (selected: false), or select it again. */
+export const setItemSelected = (runId: string, itemId: string, selected: boolean) =>
+  apiRequest<SyncRunItem>(`/runs/${runId}/items/${itemId}/exclude`, {
+    method: selected ? 'DELETE' : 'POST',
+  });
+
+/** Post the reviewed dry run's selected rows: a new run, without a rescan. */
+export const postSelected = (runId: string) =>
+  apiRequest<{ run_id: string }>(`/runs/${runId}/post`, { method: 'POST' });

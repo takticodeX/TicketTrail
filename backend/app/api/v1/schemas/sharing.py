@@ -60,11 +60,15 @@ class TransferRequest(BaseModel):
 
 
 class TransferResponse(BaseModel):
+    """One owner change: a project (or everything a user owned) given to a user or organization."""
+
     id: uuid.UUID
     created_at: datetime
-    admin: UserSummary | None
+    actor: UserSummary | None = Field(description="Who changed the owner")
     from_user: UserSummary | None
+    from_organization: OrganizationSummary | None
     to_user: UserSummary | None
+    to_organization: OrganizationSummary | None
     project_id: uuid.UUID | None = Field(description="Null when everything was moved")
     projects_moved: int
     connections_moved: int

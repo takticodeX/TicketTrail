@@ -78,3 +78,46 @@ export function useCancelRun(runId: string) {
     onSettled: () => queryClient.invalidateQueries({ queryKey: runKeys.detail(runId) }),
   });
 }
+
+/** After a review change: the run's counts and rows. */
+function useReviewMutation<T, R>(runId: string, mutationFn: (args: T) => Promise<R>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: runKeys.detail(runId) });
+      void queryClient.invalidateQueries({ queryKey: runKeys.items(runId) });
+    },
+  });
+}
+
+export const useSetItemWorkItem = (runId: string) =>
+  useReviewMutation(runId, ({ itemId, workItemId }: { itemId: string; workItemId: number }) =>
+    api.setItemWorkItem(runId, itemId, workItemId),
+  );
+
+export const useSetItemSelected = (runId: string) =>
+  useReviewMutation(runId, ({ itemId, selected }: { itemId: string; selected: boolean }) =>
+    api.setItemSelected(runId, itemId, selected),
+  );
+
+export function usePostSelected(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.postSelected,
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: runKeys.list(projectId) });
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
+export function useWorkItemSearch(projectId: string, query: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['work-items', projectId, query],
+    queryFn: ({ signal }) => api.searchWorkItems(projectId, query, signal),
+    enabled,
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
+  });
+}

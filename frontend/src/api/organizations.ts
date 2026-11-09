@@ -1,5 +1,6 @@
 import { apiRequest } from './client';
-import type { Organization, OrganizationMember, OrganizationRole, ProjectMoved } from './types';
+import type { OwnershipTransfer } from './admin';
+import type { Organization, OrganizationMember, OrganizationRole } from './types';
 
 const base = (id: string) => `/organizations/${id}`;
 
@@ -20,6 +21,6 @@ export const updateMember = (id: string, userId: string, role: OrganizationRole)
 export const removeMember = (id: string, userId: string) =>
   apiRequest<void>(`${base(id)}/members/${userId}`, { method: 'DELETE' });
 
-/** Into an organization (the personal owner), or out of it to a member (its admins). */
-export const moveProject = (projectId: string, target: { organization_id: string } | { to_user_id: string }) =>
-  apiRequest<ProjectMoved>(`/projects/${projectId}/move`, { method: 'POST', body: target });
+/** Give a project, with its connections, to an organization or a user ("Change owner"). */
+export const changeOwner = (projectId: string, target: { organization_id: string } | { to_user_id: string }) =>
+  apiRequest<OwnershipTransfer>(`/projects/${projectId}/owner`, { method: 'POST', body: target });

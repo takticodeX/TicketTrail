@@ -47,6 +47,7 @@ from app.db.models import (
 from app.db.repositories import (
     CursorRepository,
     PostedCommentRepository,
+    ReviewRepository,
     close_stale_runs,
     other_run_active,
 )
@@ -101,6 +102,7 @@ class _Pair:
     commit: Commit
     branch: str
     work_item_id: int
+    manual: bool = False
 
 
 @dataclass
@@ -125,6 +127,8 @@ class _Run:
         action: ItemAction,
         work_item_id: int | None = None,
         detail: str | None = None,
+        *,
+        manual: bool = False,
     ) -> None:
         self.db.add(
             SyncRunItem(
@@ -136,6 +140,7 @@ class _Run:
                 detail=detail,
                 commit_subject=commit.subject[:MAX_SUBJECT_LENGTH],
                 branch=branch,
+                manual=manual,
             )
         )
         self._position += 1
@@ -268,17 +273,55 @@ class _Entry:
     branch: str
     ids: list[int]
     error: str | None = None
+    # Of `ids`, those linked by hand in a review.
+    linked: frozenset[int] = frozenset()
+    # Pairs deselected in a review: recorded as excluded, never posted.
+    excluded: tuple[int, ...] = ()
 
 
-def _extract(scan: _Scan, pattern: TicketPattern) -> list[_Entry]:
+def _review(
+    state: _Run, commits: list[Commit]
+) -> tuple[dict[str, list[int]], set[tuple[str, int]]]:
+    review = ReviewRepository(state.db, state.project.id)
+    shas = [commit.sha for commit in commits]
+    return review.links(shas), review.exclusions(shas)
+
+
+def _entry(
+    commit: Commit,
+    branch: str,
+    ids: list[int],
+    links: dict[str, list[int]],
+    exclusions: set[tuple[str, int]],
+    error: str | None = None,
+) -> _Entry:
+    """Add the commit's manual links to `ids`, and set its excluded pairs apart."""
+    linked = links.get(commit.sha, [])
+    every = list(dict.fromkeys([*ids, *linked]))
+    excluded = tuple(i for i in every if (commit.sha, i) in exclusions)
+    kept = [i for i in every if i not in excluded]
+    return _Entry(commit, branch, kept, error, frozenset(linked), excluded)
+
+
+def _extract(state: _Run, scan: _Scan, pattern: TicketPattern) -> list[_Entry]:
+    links, exclusions = _review(state, [commit for commit, _ in scan.commits])
     entries: list[_Entry] = []
     for commit, branch in scan.commits:
         try:
-            entries.append(_Entry(commit, branch, pattern.extract(commit.message)))
+            ids = pattern.extract(commit.message)
         except PatternTimeoutError:
             entries.append(
-                _Entry(commit, branch, [], "The ticket pattern took too long on this message.")
+                _entry(
+                    commit,
+                    branch,
+                    [],
+                    links,
+                    exclusions,
+                    "The ticket pattern took too long on this message.",
+                )
             )
+            continue
+        entries.append(_entry(commit, branch, ids, links, exclusions))
     return entries
 
 
@@ -371,6 +414,7 @@ def _post(state: _Run, tracker: AzureBoardsClient, pair: _Pair, git: GitConnecti
             ItemAction.SKIPPED_DUPLICATE,
             work_item_id,
             "Being posted by another run.",
+            manual=pair.manual,
         )
         return
     db.commit()  # the guard must be durable before the comment is sent
@@ -381,7 +425,9 @@ def _post(state: _Run, tracker: AzureBoardsClient, pair: _Pair, git: GitConnecti
         # The comment may have reached Azure (for example a timeout after sending):
         # keep the guard pending; the next run checks for the marker.
         state.blocked.add(commit.sha)
-        state.item(commit, branch, ItemAction.ERROR, work_item_id, f"{exc} Will retry.")
+        state.item(
+            commit, branch, ItemAction.ERROR, work_item_id, f"{exc} Will retry.", manual=pair.manual
+        )
         db.commit()
         return
     except TrackerNotFoundError:
@@ -392,6 +438,7 @@ def _post(state: _Run, tracker: AzureBoardsClient, pair: _Pair, git: GitConnecti
             ItemAction.SKIPPED_NOT_FOUND,
             work_item_id,
             "The work item was deleted during the run.",
+            manual=pair.manual,
         )
         db.commit()
         return
@@ -401,14 +448,16 @@ def _post(state: _Run, tracker: AzureBoardsClient, pair: _Pair, git: GitConnecti
         raise
     except TrackerError as exc:  # refused for good (for example a 400)
         db.delete(guard)
-        state.item(commit, branch, ItemAction.ERROR, work_item_id, str(exc))
+        state.item(commit, branch, ItemAction.ERROR, work_item_id, str(exc), manual=pair.manual)
         db.commit()
         return
 
     guard.status = CommentStatus.POSTED
     guard.azure_comment_id = comment_id
     guard.posted_at = datetime.now(UTC)
-    state.item(commit, branch, ItemAction.POSTED, work_item_id, f"Comment {comment_id}")
+    state.item(
+        commit, branch, ItemAction.POSTED, work_item_id, f"Comment {comment_id}", manual=pair.manual
+    )
     db.commit()
 
 
@@ -420,7 +469,11 @@ def _process(
     Returns True if the run was cancelled; the commits not reached are blocked,
     so cursors stop before them.
     """
-    pairs = [_Pair(e.commit, e.branch, work_item_id) for e in entries for work_item_id in e.ids]
+    pairs = [
+        _Pair(e.commit, e.branch, work_item_id, work_item_id in e.linked)
+        for e in entries
+        for work_item_id in e.ids
+    ]
     with ExitStack() as stack:
         tracker = stack.enter_context(_tracker(state, azure)) if pairs else None
         posted: set[tuple[str, int]] = set()
@@ -443,9 +496,19 @@ def _process(
             commit, branch = entry.commit, entry.branch
             if entry.error is not None:
                 state.item(commit, branch, ItemAction.ERROR, detail=entry.error)
-            elif not entry.ids:
+            elif not entry.ids and not entry.excluded:
                 state.item(commit, branch, ItemAction.NO_REFERENCE)
+            for work_item_id in entry.excluded:
+                state.item(
+                    commit,
+                    branch,
+                    ItemAction.EXCLUDED,
+                    work_item_id,
+                    "Deselected in a review: never posted.",
+                    manual=work_item_id in entry.linked,
+                )
             for work_item_id in entry.ids:
+                manual = work_item_id in entry.linked
                 if (commit.sha, work_item_id) in posted:
                     state.item(
                         commit,
@@ -453,6 +516,7 @@ def _process(
                         ItemAction.SKIPPED_DUPLICATE,
                         work_item_id,
                         "Already posted.",
+                        manual=manual,
                     )
                 elif work_item_id not in found:
                     state.item(
@@ -461,11 +525,12 @@ def _process(
                         ItemAction.SKIPPED_NOT_FOUND,
                         work_item_id,
                         "No such work item in this project.",
+                        manual=manual,
                     )
                 elif state.run.dry_run:
-                    state.item(commit, branch, ItemAction.WOULD_POST, work_item_id)
+                    state.item(commit, branch, ItemAction.WOULD_POST, work_item_id, manual=manual)
                 elif tracker is not None:
-                    _post(state, tracker, _Pair(commit, branch, work_item_id), git)
+                    _post(state, tracker, _Pair(commit, branch, work_item_id, manual), git)
             state.heartbeat()
     return False
 
@@ -496,9 +561,12 @@ def _execute(state: _Run) -> None:
     except InvalidPatternError as exc:
         raise RunFailedError(f"The ticket pattern {exc}.") from exc
 
+    if state.run.source_run_id is not None:
+        _execute_selected(state, git, azure)
+        return
     scan = _scan_git(state, git)
     state.heartbeat(force=True)
-    entries = _extract(scan, pattern)
+    entries = _extract(state, scan, pattern)
     try:
         cancelled = _process(state, entries, azure, git)
     except TrackerAuthError as exc:
@@ -515,6 +583,67 @@ def _execute(state: _Run) -> None:
             f"Cancelled by the user after {done} of {len(entries)} commits. "
             "The next run continues from there."
         )
+
+
+def _execute_selected(state: _Run, git: GitConnection, azure: AzureConnection) -> None:
+    """Post exactly what a reviewed dry run would post: no scan, no cursor moves.
+
+    The pairs are the source run's `would_post` items, as the review left them.
+    Exclusions are read again (one may have been added since), and posting is as
+    safe as any run: posted_comments skips what is already there.
+    """
+    db = state.db
+    items = db.scalars(
+        select(SyncRunItem)
+        .where(
+            SyncRunItem.sync_run_id == state.run.source_run_id,
+            SyncRunItem.action == ItemAction.WOULD_POST,
+        )
+        .order_by(SyncRunItem.position)
+    ).all()
+    if not items:
+        raise RunFailedError("The reviewed dry run has nothing left to post.")
+
+    client = _git_client(state.context, git)
+    path = state.context.repos_dir / str(state.project.id)
+    try:
+        check_public_host(git.repo_url, allow_private=state.context.settings.allow_private_hosts)
+    except UnsafeUrlError as exc:
+        raise RunFailedError(f"Repository URL refused: {exc}.") from exc
+    client.mirror(git.repo_url, path)
+    commits = client.read_commits(path, [item.commit_sha for item in items])
+    state.run.commits_scanned = len(commits)
+    state.heartbeat(force=True)
+
+    by_commit: dict[str, tuple[str, list[int], set[int]]] = {}
+    for item in items:
+        if item.work_item_id is None:
+            continue
+        _, ids, manual = by_commit.setdefault(item.commit_sha, (item.branch, [], set()))
+        ids.append(item.work_item_id)
+        if item.manual:
+            manual.add(item.work_item_id)
+    missing = [sha for sha in by_commit if sha not in commits]
+    if missing:
+        state.warnings.append(
+            f"{len(missing)} commit(s) are no longer in the repository and were left out."
+        )
+    _, exclusions = _review(state, list(commits.values()))
+    entries = [
+        _entry(commits[sha], branch, ids, {sha: sorted(manual)}, exclusions)
+        for sha, (branch, ids, manual) in by_commit.items()
+        if sha in commits
+    ]
+    try:
+        cancelled = _process(state, entries, azure, git)
+    except TrackerAuthError as exc:
+        azure.last_test_ok = False
+        azure.last_test_at = datetime.now(UTC)
+        raise RunFailedError(f"Azure DevOps: {exc}") from exc
+    except TrackerError as exc:
+        raise RunFailedError(f"Azure DevOps: {exc}") from exc
+    if cancelled:
+        raise _RunCancelledError("Cancelled by the user; what was posted stays posted.")
 
 
 def _git_failure(exc: GitError) -> str:

@@ -164,23 +164,24 @@ describe('organization projects', () => {
     expect(within(card).queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
   });
 
-  it("offers an organization's admin to move the project to a member", async () => {
+  it("lets an organization's admin give the project to a member", async () => {
+    vi.mocked(useAuth).mockReturnValue(authValue({ user: { ...authValue().user!, role: 'user' } }));
     const fetchMock = mockFetch({
       'GET /api/v1/projects/p1': () => jsonResponse(project),
       'GET /api/v1/projects/p1/runs?page=1&page_size=20': () => page([]),
       'GET /api/v1/organizations': () => jsonResponse([acme]),
       'GET /api/v1/organizations/o1/members': () => jsonResponse(members),
-      'POST /api/v1/projects/p1/move': () => jsonResponse({ project_id: 'p1', summary: 'Moved' }),
+      'POST /api/v1/projects/p1/owner': () => jsonResponse({ project_id: 'p1', summary: 'Moved' }),
       'GET /api/v1/projects?page_size=100': () => page([]),
     });
     renderAt('/projects/p1');
     expect(await screen.findByText('Acme')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Leave' })).not.toBeInTheDocument();
-    await userEvent.click(await screen.findByRole('button', { name: 'Move to a member' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Move to a member' });
-    await userEvent.click(within(dialog).getByRole('textbox', { name: 'Member' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Change owner' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Change the owner of "Shop"' });
+    await userEvent.click(within(dialog).getByRole('textbox', { name: 'User' }));
     await userEvent.click(await screen.findByRole('option', { name: 'Ben (ben@example.com)' }));
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Change owner' }));
 
     expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
@@ -188,19 +189,22 @@ describe('organization projects', () => {
   });
 
   it('moves a personal project into an organization', async () => {
+    vi.mocked(useAuth).mockReturnValue(authValue({ user: { ...authValue().user!, role: 'user' } }));
     const personal = { ...project, owner: alice, organization: null };
     const fetchMock = mockFetch({
       'GET /api/v1/projects/p1': () => jsonResponse(personal),
       'GET /api/v1/projects/p1/runs?page=1&page_size=20': () => page([]),
       'GET /api/v1/organizations': () => jsonResponse([acme]),
-      'POST /api/v1/projects/p1/move': () => jsonResponse({ project_id: 'p1', summary: 'Moved' }),
+      'POST /api/v1/projects/p1/owner': () => jsonResponse({ project_id: 'p1', summary: 'Moved' }),
     });
     renderAt('/projects/p1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Move to an organization' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Move to an organization' });
+    await userEvent.click(await screen.findByRole('button', { name: 'Change owner' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Change the owner of "Shop"' });
+    // A personal project goes to an organization: only administrators give it to a user.
+    expect(within(dialog).queryByText('A user')).not.toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole('textbox', { name: 'Organization' }));
     await userEvent.click(await screen.findByRole('option', { name: 'Acme' }));
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Change owner' }));
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
     expect(body(post?.[1])).toEqual({ organization_id: 'o1' });

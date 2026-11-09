@@ -34,9 +34,11 @@ const billing: AdminProject = {
 const done: OwnershipTransfer = {
   id: 't1',
   created_at: '2026-10-20T10:00:00Z',
-  admin: { id: 'u1', display_name: 'Alice', email: 'alice@example.com' },
+  actor: { id: 'u1', display_name: 'Alice', email: 'alice@example.com' },
   from_user: marco,
+  from_organization: null,
   to_user: anna,
+  to_organization: null,
   project_id: 'p1',
   projects_moved: 1,
   connections_moved: 2,
@@ -53,13 +55,15 @@ async function pickNewOwner(name: string) {
 }
 
 describe('AdminProjectsPage', () => {
-  it('lists every project with its owner and transfers one', async () => {
+  it('lists every project with its owner and changes the owner of one', async () => {
     let transfers: OwnershipTransfer[] = [];
     const fetchMock = mockFetch({
       'GET /api/v1/admin/projects?page=1&page_size=50': () => page([billing]),
       'GET /api/v1/admin/transfers?page=1&page_size=20': () => page(transfers),
       'GET /api/v1/admin/users?page=1&page_size=100': () => page([testUser, marco, anna]),
-      'POST /api/v1/admin/projects/p1/transfer': () => {
+      'GET /api/v1/admin/organizations?page=1&page_size=100': () => page([]),
+      'GET /api/v1/organizations': () => jsonResponse([]),
+      'POST /api/v1/projects/p1/owner': () => {
         transfers = [done];
         return jsonResponse(done);
       },
@@ -70,15 +74,18 @@ describe('AdminProjectsPage', () => {
     expect(within(table).getByText('Turned off')).toBeInTheDocument();
     expect(await screen.findByText('No transfers yet.')).toBeInTheDocument();
 
-    await userEvent.click(within(table).getByRole('button', { name: 'Transfer Billing' }));
+    await userEvent.click(within(table).getByRole('button', { name: 'Change the owner of Billing' }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(within(dialog).getByText('A user'));
+    await userEvent.click(within(dialog).getByRole('textbox', { name: 'User' }));
     // The current owner and turned-off accounts can't receive it.
-    await userEvent.click(await screen.findByRole('textbox', { name: 'New owner' }));
     expect(screen.queryByRole('option', { name: /Marco/ })).not.toBeInTheDocument();
-    await pickNewOwner('Anna (anna@example.com)');
+    await userEvent.click(await screen.findByRole('option', { name: 'Anna (anna@example.com)' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Change owner' }));
 
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ to_user_id: 'u3' });
-    const history = await screen.findByRole('table', { name: 'Transfer history' });
+    const history = await screen.findByRole('table', { name: 'Owner changes' });
     expect(within(history).getByText(done.summary)).toBeInTheDocument();
   });
 });

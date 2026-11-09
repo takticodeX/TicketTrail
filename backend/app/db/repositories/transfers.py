@@ -1,9 +1,9 @@
 """Moving projects and connections to another owner: a user or an organization.
 
-Used by the administrator's transfers and by moving a project into or out of an
-organization. Secrets move as they are, still encrypted: nobody sees them on the way.
-A connection the previous owner still uses in another project is copied instead of
-moved, so their remaining projects keep working.
+Used by "Change owner" on a project and by the administrator's "Transfer all".
+Secrets move as they are, still encrypted: nobody sees them on the way. A connection
+the previous owner still uses in another project is copied instead of moved, so their
+remaining projects keep working.
 """
 
 import uuid
@@ -174,17 +174,19 @@ def move_project(session: Session, project: Project, previous: Owner, to: Owner)
 def _record(
     session: Session,
     *,
-    admin: User,
-    previous: User,
-    to: User,
+    actor: User,
+    previous: Owner,
+    to: Owner,
     project: Project | None,
     tally: Tally,
     headline: str,
 ) -> OwnershipTransfer:
     transfer = OwnershipTransfer(
-        admin_id=admin.id,
-        from_user_id=previous.id,
-        to_user_id=to.id,
+        actor_id=actor.id,
+        from_user_id=previous.user_id,
+        from_organization_id=previous.organization_id,
+        to_user_id=to.user_id,
+        to_organization_id=to.organization_id,
         project_id=project.id if project else None,
         projects_moved=tally.projects,
         connections_moved=tally.moved,
@@ -196,15 +198,15 @@ def _record(
     return transfer
 
 
-def transfer_project(
-    session: Session, *, admin: User, project: Project, previous: User, to: User
+def change_owner(
+    session: Session, *, actor: User, project: Project, previous: Owner, to: Owner
 ) -> OwnershipTransfer:
-    """The administrator gives one personal project, with its connections, to another user."""
-    headline = f'Project "{project.name}" from {previous.email} to {to.email}'
-    tally = move_project(session, project, Owner.of_user(previous), Owner.of_user(to))
+    """Give one project, with its connections, to another user or organization, and record it."""
+    headline = f'Project "{project.name}" from {previous.describe} to {to.describe}'
+    tally = move_project(session, project, previous, to)
     return _record(
         session,
-        admin=admin,
+        actor=actor,
         previous=previous,
         to=to,
         project=project,
@@ -214,7 +216,7 @@ def transfer_project(
 
 
 def transfer_everything(
-    session: Session, *, admin: User, previous: User, to: User
+    session: Session, *, actor: User, previous: User, to: User
 ) -> OwnershipTransfer:
     """Give every project and connection a user owns personally to another user.
 
@@ -235,9 +237,9 @@ def transfer_everything(
     drop_shares(session, [p.id for p in projects], to.id)
     return _record(
         session,
-        admin=admin,
-        previous=previous,
-        to=to,
+        actor=actor,
+        previous=source,
+        to=target,
         project=None,
         tally=tally,
         headline=headline,

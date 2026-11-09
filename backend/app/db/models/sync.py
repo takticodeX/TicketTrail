@@ -34,6 +34,8 @@ class ItemAction(StrEnum):
     SKIPPED_NOT_FOUND = "skipped_not_found"
     NO_REFERENCE = "no_reference"
     ERROR = "error"
+    # Deselected in a dry-run review: never posted (commit_exclusions).
+    EXCLUDED = "excluded"
 
 
 def _in(column: str, enum: type[StrEnum]) -> str:
@@ -69,6 +71,10 @@ class SyncRun(TimestampedModel):
         ForeignKey("users.id", ondelete="SET NULL")
     )
     triggered_by: Mapped[User | None] = relationship(lazy="selectin")
+    # Set on a "Post selected" run: the reviewed dry run whose selection it posts.
+    source_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sync_runs.id", ondelete="SET NULL")
+    )
 
 
 class SyncRunItem(TimestampedModel):
@@ -92,6 +98,8 @@ class SyncRunItem(TimestampedModel):
     # Not in the spec's key columns: shown in the item list without opening Git.
     commit_subject: Mapped[str] = mapped_column(String(500), default="", server_default="")
     branch: Mapped[str] = mapped_column(String(255), default="", server_default="")
+    # The work item was linked by hand (commit_links), not found in the message.
+    manual: Mapped[bool] = mapped_column(default=False, server_default=false())
 
 
 class CommentStatus(StrEnum):
@@ -135,3 +143,37 @@ class ProjectCursor(TimestampedModel):
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     branch: Mapped[str] = mapped_column(String(255))
     last_sha: Mapped[str] = mapped_column(String(40))
+
+
+class CommitLink(TimestampedModel):
+    """A work item linked to a commit by hand, as if the message referenced it."""
+
+    __tablename__ = "commit_links"
+    __table_args__ = (
+        UniqueConstraint("project_id", "commit_sha", "work_item_id", name="uq_commit_links_pair"),
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    commit_sha: Mapped[str] = mapped_column(String(40))
+    work_item_id: Mapped[int]
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
+class CommitExclusion(TimestampedModel):
+    """A commit / work item pair deselected in a review: never posted, by any run."""
+
+    __tablename__ = "commit_exclusions"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "commit_sha", "work_item_id", name="uq_commit_exclusions_pair"
+        ),
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    commit_sha: Mapped[str] = mapped_column(String(40))
+    work_item_id: Mapped[int]
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )

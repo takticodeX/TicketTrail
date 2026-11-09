@@ -210,11 +210,6 @@ export interface OrganizationMember {
   created_at: string;
 }
 
-export interface ProjectMoved {
-  project_id: string;
-  summary: string;
-}
-
 export interface ProjectShare {
   user: UserSummary;
   role: ShareRole;
@@ -241,7 +236,8 @@ export type ItemAction =
   | 'skipped_duplicate'
   | 'skipped_not_found'
   | 'no_reference'
-  | 'error';
+  | 'error'
+  | 'excluded';
 
 export interface SyncRun {
   id: string;
@@ -262,6 +258,8 @@ export interface SyncRun {
   cancel_requested: boolean;
   /** Who started a manual run; null for scheduled runs. */
   triggered_by?: UserSummary | null;
+  /** For a Post selected run: the reviewed dry run it posts. */
+  source_run_id?: string | null;
 }
 
 export interface SyncRunDetail extends SyncRun {
@@ -276,6 +274,25 @@ export interface SyncRunItem {
   work_item_id: number | null;
   action: ItemAction;
   detail: string | null;
+  /** The work item was linked by hand in a review. */
+  manual?: boolean;
+}
+
+/** A work item of the board, offered by the review's picker. */
+export interface WorkItemOption {
+  id: number;
+  title: string;
+  /** Bug, Task, User Story, ... */
+  type: string;
+  state: string;
+  /** Closed, done or removed: listed last. */
+  closed: boolean;
+}
+
+export interface WorkItemSearchResult {
+  ok: boolean;
+  items: WorkItemOption[];
+  error: string | null;
 }
 
 export interface ErrorBody {

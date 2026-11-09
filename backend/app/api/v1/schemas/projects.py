@@ -195,8 +195,8 @@ class ProjectResponse(BaseModel):
     azure_connection: ProjectAzureSummary | None = None
 
 
-class ProjectMove(BaseModel):
-    """Exactly one: into an organization (the personal owner), or to a member (its admins)."""
+class OwnerChange(BaseModel):
+    """The new owner of a project: exactly one of an organization and a user."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -208,11 +208,6 @@ class ProjectMove(BaseModel):
         if (self.organization_id is None) == (self.to_user_id is None):
             raise ValueError("send exactly one of organization_id and to_user_id")
         return self
-
-
-class ProjectMoved(BaseModel):
-    project_id: uuid.UUID
-    summary: str = Field(description="What moved, what was copied and what was renamed")
 
 
 class PatternTestRequest(BaseModel):

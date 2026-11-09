@@ -21,7 +21,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { errorMessage } from '../api/errors';
 import type { SyncRun } from '../api/types';
 import { confirmDelete } from '../components/confirmDelete';
-import { MoveProjectModal } from '../components/MoveProjectModal';
+import { ChangeOwnerModal } from '../components/ChangeOwnerModal';
 import { RoleBadge, SharingLine } from '../components/ProjectAccess';
 import { RunStatusBadge } from '../components/RunStatusBadge';
 import { ShareDrawer } from '../components/ShareDrawer';
@@ -72,8 +72,9 @@ export function ProjectDetailPage() {
   const gitConnection = project.data.git_connection;
   const azureConnection = project.data.azure_connection;
   const editable = canEdit(project.data);
-  // Into an organization needs one to belong to; out of one is always possible for its admins.
-  const canMove = Boolean(project.data.organization) || (organizations.data?.length ?? 0) > 0;
+  // A personal project needs an organization to go to (administrators can always pick someone).
+  const canMove =
+    user?.role === 'admin' || Boolean(project.data.organization) || (organizations.data?.length ?? 0) > 0;
 
   const onDeleteRun = (run: SyncRun) =>
     confirmDelete({
@@ -144,7 +145,7 @@ export function ProjectDetailPage() {
         <Group gap="sm">
           {isOwner(project.data) && canMove && (
             <Button variant="subtle" onClick={() => setMoving(true)}>
-              {project.data.organization ? 'Move to a member' : 'Move to an organization'}
+              Change owner
             </Button>
           )}
           {isOwner(project.data) ? (
@@ -173,7 +174,7 @@ export function ProjectDetailPage() {
       {isOwner(project.data) && (
         <>
           <ShareDrawer project={project.data} opened={sharing} onClose={() => setSharing(false)} />
-          <MoveProjectModal project={project.data} opened={moving} onClose={() => setMoving(false)} />
+          <ChangeOwnerModal project={project.data} opened={moving} onClose={() => setMoving(false)} />
         </>
       )}
       {project.data.admin_access && (

@@ -3,10 +3,10 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { listAllProjects, listTransfers, transferProject, type AdminProject } from '../../api/admin';
+import { listAllProjects, listTransfers, type AdminProject } from '../../api/admin';
 import { errorMessage } from '../../api/errors';
 import { RunStatusBadge } from '../../components/RunStatusBadge';
-import { TransferModal } from '../../components/TransferModal';
+import { ChangeOwnerModal } from '../../components/ChangeOwnerModal';
 import { formatDateTime } from '../../lib/runs';
 
 const PAGE_SIZE = 50;
@@ -23,7 +23,7 @@ function TransferHistory() {
 
   return (
     <Stack gap="sm">
-      <Title order={4}>Transfer history</Title>
+      <Title order={4}>Owner changes</Title>
       {transfers.isError && (
         <Alert color="red" variant="light" role="alert">
           {errorMessage(transfers.error)}
@@ -36,7 +36,7 @@ function TransferHistory() {
       )}
       {transfers.data && transfers.data.items.length > 0 && (
         <Paper withBorder radius="md">
-          <Table verticalSpacing="sm" aria-label="Transfer history">
+          <Table verticalSpacing="sm" aria-label="Owner changes">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>When</Table.Th>
@@ -48,7 +48,7 @@ function TransferHistory() {
               {transfers.data.items.map((transfer) => (
                 <Table.Tr key={transfer.id}>
                   <Table.Td>{formatDateTime(transfer.created_at)}</Table.Td>
-                  <Table.Td>{transfer.admin?.email ?? '—'}</Table.Td>
+                  <Table.Td>{transfer.actor?.email ?? '—'}</Table.Td>
                   <Table.Td>
                     <Text size="sm">{transfer.summary}</Text>
                   </Table.Td>
@@ -79,8 +79,8 @@ export function AdminProjectsPage() {
       <div>
         <Title order={2}>Projects</Title>
         <Text c="dimmed" size="sm">
-          Every project and its owner. Open one to see and change everything, or transfer it to a new owner, for
-          example when a colleague leaves.
+          Every project and its owner. Open one to see and change everything, or change its owner, for example when
+          a colleague leaves.
         </Text>
       </div>
       {projects.isPending && (
@@ -152,17 +152,14 @@ export function AdminProjectsPage() {
                       )}
                     </Table.Td>
                     <Table.Td>
-                      {/* An organization's admins move its projects themselves. */}
-                      {project.owner && (
-                        <Button
-                          size="xs"
-                          variant="default"
-                          aria-label={`Transfer ${project.name}`}
-                          onClick={() => setMoving(project)}
-                        >
-                          Transfer
-                        </Button>
-                      )}
+                      <Button
+                        size="xs"
+                        variant="default"
+                        aria-label={`Change the owner of ${project.name}`}
+                        onClick={() => setMoving(project)}
+                      >
+                        Change owner
+                      </Button>
                     </Table.Td>
                   </Table.Tr>
                 ))}
@@ -173,18 +170,7 @@ export function AdminProjectsPage() {
       )}
       {totalPages > 1 && <Pagination total={totalPages} value={page} onChange={setPage} />}
       <TransferHistory />
-      <TransferModal
-        opened={moving !== null}
-        onClose={() => setMoving(null)}
-        title={moving ? `Transfer "${moving.name}"` : 'Transfer'}
-        explanation={
-          moving &&
-          `The new owner gets "${moving.name}" and the connections it uses. A connection ` +
-            `${moving.owner?.display_name ?? 'the owner'} still uses in another project is copied instead.`
-        }
-        excludeUserId={moving?.owner?.id ?? ''}
-        transfer={(toUserId) => transferProject(moving?.id ?? '', toUserId)}
-      />
+      {moving && <ChangeOwnerModal project={moving} opened onClose={() => setMoving(null)} />}
     </Stack>
   );
 }

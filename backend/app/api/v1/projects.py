@@ -14,8 +14,10 @@ from sqlalchemy import func, select
 
 from app.api.access import insufficient_role, organization_for, project_for
 from app.api.deps import CurrentUser, DbSession, PageDep, SettingsDep
+from app.api.v1.owner_changes import transfer_responses
 from app.api.v1.schemas import (
     OrganizationSummary,
+    OwnerChange,
     Page,
     PatternSampleResult,
     PatternTestRequest,
@@ -23,11 +25,10 @@ from app.api.v1.schemas import (
     ProjectAzureSummary,
     ProjectCreate,
     ProjectGitSummary,
-    ProjectMove,
-    ProjectMoved,
     ProjectResponse,
     ProjectUpdate,
     RunResponse,
+    TransferResponse,
     UserSummary,
 )
 from app.config import Settings
@@ -53,7 +54,7 @@ from app.db.repositories import (
     SeenProject,
     project_summaries,
 )
-from app.db.repositories.transfers import Owner, move_project
+from app.db.repositories.transfers import Owner, change_owner
 from app.integrations.git.hosts import commit_url_pattern, detect_host
 from app.sync.parser import InvalidPatternError, PatternTimeoutError, compile_ticket_pattern
 
@@ -306,48 +307,66 @@ def delete_project(project_id: uuid.UUID, user: CurrentUser, db: DbSession) -> R
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{project_id}/move")
-def move(
-    project_id: uuid.UUID, body: ProjectMove, user: CurrentUser, db: DbSession
-) -> ProjectMoved:
-    """Move a project into an organization, or out of it to one of its members.
+@router.post("/{project_id}/owner")
+def change_project_owner(
+    project_id: uuid.UUID, body: OwnerChange, user: CurrentUser, db: DbSession
+) -> TransferResponse:
+    """Give the project, with its connections, to an organization or a user.
 
-    - Into an organization: the project's personal owner, who must be a member.
-      If they are not an admin there, they stay an editor of the project.
-    - Out of an organization: its admins, to an active member.
+    Anyone with the owner role may do it:
 
-    The connections come along; one the previous owner still uses elsewhere is copied.
+    - to an organization they belong to (administrators: any organization);
+    - to a member of the project's organization (administrators: any active user).
+
+    A connection the previous owner still uses elsewhere is copied. A personal owner who
+    isn't an admin of the receiving organization stays an editor of the project.
     """
-    seen = project_for(db, user, project_id, ProjectRole.OWNER, action="move")
+    seen = project_for(db, user, project_id, ProjectRole.OWNER, action="change the owner of")
     project = seen.project
-    if body.organization_id is not None:
-        if seen.owner is None:
-            raise AppError(
-                409, "not_personal", "Only a personal project can be moved into an organization."
-            )
-        organization, org_role = organization_for(db, user, body.organization_id)
-        previous, target = Owner.of_user(seen.owner), Owner.of_organization(organization)
-        tally = move_project(db, project, previous, target)
-        if org_role is OrganizationRole.MEMBER:
-            ProjectShareRepository(db, project.id).add(user.id, ProjectRole.EDITOR)
+    if seen.owner is not None:
+        previous = Owner.of_user(seen.owner)
     else:
-        if seen.organization is None:
-            raise AppError(
-                409, "not_in_organization", "Only an organization's project can go to a member."
-            )
-        assert body.to_user_id is not None  # noqa: S101  (validated by ProjectMove)
-        member = MemberRepository(db, seen.organization.id).get(body.to_user_id)
+        assert seen.organization is not None  # noqa: S101  (exactly one owner)
+        previous = Owner.of_organization(seen.organization)
+
+    if body.organization_id is not None:
+        organization, _ = organization_for(db, user, body.organization_id)
+        if project.organization_id == organization.id:
+            raise field_error("organization_id", "The organization already owns this project")
+        target = Owner.of_organization(organization)
+    else:
+        assert body.to_user_id is not None  # noqa: S101  (validated by OwnerChange)
         recipient = db.get(User, body.to_user_id)
-        if member is None or recipient is None or not recipient.is_active:
-            raise field_error("to_user_id", "Not an active member of the organization")
-        previous, target = Owner.of_organization(seen.organization), Owner.of_user(recipient)
-        tally = move_project(db, project, previous, target)
+        if recipient is None or not recipient.is_active:
+            raise field_error("to_user_id", "Not an active user")
+        if recipient.id == project.owner_id:
+            raise field_error("to_user_id", "This user already owns this project")
+        in_organization = seen.organization is not None and (
+            MemberRepository(db, seen.organization.id).get(recipient.id) is not None
+        )
+        if not (user.is_admin or in_organization):
+            raise AppError(
+                403,
+                "insufficient_role",
+                "Only an administrator can give a project to someone outside its organization.",
+            )
+        target = Owner.of_user(recipient)
+
+    transfer = change_owner(db, actor=user, project=project, previous=previous, to=target)
+    if seen.owner is not None and body.organization_id is not None:
+        # The previous personal owner keeps editing, unless they own it as an org admin.
+        member = MemberRepository(db, body.organization_id).get(seen.owner.id)
+        shares = ProjectShareRepository(db, project.id)
+        if (member is None or member.role != OrganizationRole.ADMIN) and not shares.get(
+            seen.owner.id
+        ):
+            shares.add(seen.owner.id, ProjectRole.EDITOR)
     db.commit()
-    summary = "; ".join(
-        [f'Project "{project.name}" from {previous.describe} to {target.describe}', *tally.notes]
+    db.refresh(transfer)
+    logger.info(
+        "User %s changed the owner of project %s: %s", user.id, project.id, transfer.summary
     )
-    logger.info("User %s moved project %s: %s", user.id, project.id, summary)
-    return ProjectMoved(project_id=project.id, summary=summary)
+    return transfer_responses(db, [transfer])[0]
 
 
 @router.post("/{project_id}/test-pattern")

@@ -40,17 +40,17 @@ from app.api.v1.schemas.organizations import (
     PromoteAdmin,
 )
 from app.api.v1.schemas.projects import (
+    OwnerChange,
     PatternSampleResult,
     PatternTestRequest,
     PatternTestResponse,
     ProjectAzureSummary,
     ProjectCreate,
     ProjectGitSummary,
-    ProjectMove,
-    ProjectMoved,
     ProjectResponse,
     ProjectUpdate,
 )
+from app.api.v1.schemas.review import ItemWorkItem, WorkItemOption, WorkItemSearchResult
 from app.api.v1.schemas.runs import (
     RunDetailResponse,
     RunItemResponse,
@@ -93,6 +93,7 @@ __all__ = [
     "GitConnectionUpdate",
     "GitTestResult",
     "HealthResponse",
+    "ItemWorkItem",
     "LoginRequest",
     "MemberCreate",
     "MemberResponse",
@@ -101,6 +102,7 @@ __all__ = [
     "OrganizationResponse",
     "OrganizationSummary",
     "OrganizationUpdate",
+    "OwnerChange",
     "Page",
     "PatternSampleResult",
     "PatternTestRequest",
@@ -108,8 +110,6 @@ __all__ = [
     "ProjectAzureSummary",
     "ProjectCreate",
     "ProjectGitSummary",
-    "ProjectMove",
-    "ProjectMoved",
     "ProjectResponse",
     "ProjectUpdate",
     "PromoteAdmin",
@@ -130,4 +130,6 @@ __all__ = [
     "UserResponse",
     "UserSummary",
     "UserUpdateRequest",
+    "WorkItemOption",
+    "WorkItemSearchResult",
 ]

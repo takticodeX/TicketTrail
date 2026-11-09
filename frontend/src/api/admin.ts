@@ -28,14 +28,17 @@ export interface AdminProject {
 export interface OwnershipTransfer {
   id: string;
   created_at: string;
-  admin: UserSummary | null;
+  /** Who changed the owner. */
+  actor: UserSummary | null;
   from_user: UserSummary | null;
+  from_organization: OrganizationSummary | null;
   to_user: UserSummary | null;
-  /** Null when everything the user owned was moved. */
+  to_organization: OrganizationSummary | null;
+  /** Null when everything a user owned was moved. */
   project_id: string | null;
   projects_moved: number;
   connections_moved: number;
-  /** Connections still used by the previous owner's other projects are copied. */
+  /** Connections the previous owner still uses elsewhere are copied. */
   connections_copied: number;
   summary: string;
 }
@@ -48,12 +51,6 @@ export const setUserActive = (userId: string, isActive: boolean) =>
 
 export const listAllProjects = (page: number, pageSize = 50) =>
   apiRequest<Page<AdminProject>>(`/admin/projects?page=${page}&page_size=${pageSize}`);
-
-export const transferProject = (projectId: string, toUserId: string) =>
-  apiRequest<OwnershipTransfer>(`/admin/projects/${projectId}/transfer`, {
-    method: 'POST',
-    body: { to_user_id: toUserId },
-  });
 
 export const transferEverything = (userId: string, toUserId: string) =>
   apiRequest<OwnershipTransfer>(`/admin/users/${userId}/transfer`, {

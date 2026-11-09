@@ -13,6 +13,7 @@ from app.worker.connection_checks import run_azure_connection_check, run_git_con
 from app.worker.context import get_worker_context
 from app.worker.runner import CeleryTaskRunner
 from app.worker.scheduler import dispatch_due_schedules
+from app.worker.work_items import run_work_item_search
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,11 @@ def dispatch_schedules() -> int:
 def check_azure_connection(connection_id: str, owner_id: str | None = None) -> dict[str, Any]:
     """owner_id is ignored: kept so messages queued by an older API still run."""
     return run_azure_connection_check(get_worker_context(), uuid.UUID(connection_id))
+
+
+@celery_app.task(name=task_names.SEARCH_WORK_ITEMS)
+def search_work_items(project_id: str, text: str) -> dict[str, Any]:
+    return run_work_item_search(get_worker_context(), uuid.UUID(project_id), text)
 
 
 @worker_ready.connect

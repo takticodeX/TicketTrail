@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Center,
+  Checkbox,
   Chip,
   Code,
   Group,
@@ -22,13 +23,22 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { errorMessage } from '../api/errors';
-import type { ItemAction, SyncRunDetail } from '../api/types';
+import type { ItemAction, SyncRunDetail, SyncRunItem } from '../api/types';
 import { confirmDelete } from '../components/confirmDelete';
 import { RunStatusBadge } from '../components/RunStatusBadge';
-import { useCancelRun, useDeleteRun, useRun, useRunItems } from '../hooks/useRuns';
+import { WorkItemPicker } from '../components/WorkItemPicker';
+import {
+  useCancelRun,
+  useDeleteRun,
+  usePostSelected,
+  useRun,
+  useRunItems,
+  useSetItemSelected,
+  useSetItemWorkItem,
+} from '../hooks/useRuns';
 import { useAuth } from '../hooks/useAuth';
 import { useProject } from '../hooks/useSettings';
-import { canManageRun } from '../lib/access';
+import { canEdit, canManageRun } from '../lib/access';
 import {
   ACTION_COLORS,
   ACTION_LABELS,
@@ -42,6 +52,8 @@ import {
 
 const PAGE_SIZE = 50;
 const ALL = 'all';
+// Dry-run rows a review may point at another work item.
+const LINKABLE: ReadonlySet<ItemAction> = new Set(['no_reference', 'skipped_not_found', 'would_post', 'excluded']);
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -82,6 +94,11 @@ export function RunDetailPage() {
   const items = useRunItems(runId, page, action, live);
   const cancel = useCancelRun(runId);
   const remove = useDeleteRun(projectId);
+  const setWorkItem = useSetItemWorkItem(runId);
+  const setSelected = useSetItemSelected(runId);
+  const postSelected = usePostSelected(projectId);
+  // The row whose work item is being changed in the review.
+  const [editing, setEditing] = useState<string | null>(null);
   const navigate = useNavigate();
 
   // Reload the items once more when the run finishes, so the last ones show up.
@@ -112,6 +129,37 @@ export function RunDetailPage() {
   const totalPages = items.data ? Math.max(1, Math.ceil(items.data.total / PAGE_SIZE)) : 1;
   const failed = run.data.status === 'failed';
   const cancelled = run.data.status === 'cancelled';
+  // A finished dry run can be reviewed by whoever may post: editors and owners.
+  const reviewable =
+    run.data.dry_run &&
+    (run.data.status === 'success' || run.data.status === 'partial') &&
+    project.data !== undefined &&
+    canEdit(project.data);
+  const selectedCount = run.data.counts_by_action.would_post ?? 0;
+  const showError = (error: unknown) => notifications.show({ color: 'red', message: errorMessage(error) });
+
+  const pick = (item: SyncRunItem, workItemId: number) =>
+    setWorkItem.mutate(
+      { itemId: item.id, workItemId },
+      { onSuccess: () => setEditing(null), onError: showError },
+    );
+
+  const onPostSelected = () =>
+    modals.openConfirmModal({
+      title: 'Post the selected commits?',
+      children: (
+        <Text size="sm">
+          {selectedCount} {selectedCount === 1 ? 'comment is' : 'comments are'} posted to Azure DevOps, exactly as
+          selected here. Deselected rows are never posted, by this or any later run. Nothing is ever posted twice.
+        </Text>
+      ),
+      labels: { confirm: 'Post selected', cancel: 'Cancel' },
+      onConfirm: () =>
+        postSelected.mutate(runId, {
+          onSuccess: ({ run_id }) => navigate(`/projects/${projectId}/runs/${run_id}`),
+          onError: showError,
+        }),
+    });
 
   const onDelete = () =>
     confirmDelete({
@@ -159,18 +207,41 @@ export function RunDetailPage() {
             <Title order={2}>{run.data.dry_run ? 'Dry run' : 'Sync'}</Title>
             <RunStatusBadge status={run.data.status} />
           </Group>
-          {!live && manageable && (
-            <Button size="xs" variant="subtle" color="red" onClick={onDelete} loading={remove.isPending}>
-              Delete run
-            </Button>
-          )}
+          <Group gap="xs">
+            {reviewable && (
+              <Button size="xs" onClick={onPostSelected} disabled={selectedCount === 0} loading={postSelected.isPending}>
+                Post selected ({selectedCount})
+              </Button>
+            )}
+            {!live && manageable && (
+              <Button size="xs" variant="subtle" color="red" onClick={onDelete} loading={remove.isPending}>
+                Delete run
+              </Button>
+            )}
+          </Group>
         </Group>
         <Text size="sm" c="dimmed">
           Started {formatDateTime(run.data.started_at ?? run.data.created_at)}
           {runDuration(run.data) && ` · took ${runDuration(run.data)}`}
           {run.data.triggered_by && ` · by ${run.data.triggered_by.display_name}`}
         </Text>
+        {run.data.source_run_id && (
+          <Text size="sm" c="dimmed">
+            Posts the selection of a{' '}
+            <Anchor component={Link} to={`/projects/${projectId}/runs/${run.data.source_run_id}`} size="sm">
+              reviewed dry run
+            </Anchor>
+            .
+          </Text>
+        )}
       </div>
+      {reviewable && (
+        <Text size="sm" c="dimmed">
+          Review before posting: untick the commits not to post (they are never posted, by any run), and pick the
+          work item of a commit that has none or the wrong one (the link is kept for later runs). Then click Post
+          selected.
+        </Text>
+      )}
 
       {live && (
         <Alert color="blue" variant="light" title="The run is in progress">
@@ -236,6 +307,7 @@ export function RunDetailPage() {
                 <Table verticalSpacing="xs" highlightOnHover aria-label="Run items">
                   <Table.Thead>
                     <Table.Tr>
+                      {reviewable && <Table.Th aria-label="Selected" w={36} />}
                       <Table.Th>Commit</Table.Th>
                       <Table.Th>Message</Table.Th>
                       <Table.Th>Work item</Table.Th>
@@ -247,8 +319,28 @@ export function RunDetailPage() {
                     {items.data.items.map((item) => {
                       const link = commitUrl(gitConnection?.commit_url_pattern, item.commit_sha);
                       const sha = <Code>{item.commit_sha.slice(0, 7)}</Code>;
+                      const shortSha = item.commit_sha.slice(0, 7);
+                      const linkable = reviewable && LINKABLE.has(item.action);
+                      const picking =
+                        linkable &&
+                        (item.work_item_id === null || item.action === 'skipped_not_found' || editing === item.id);
                       return (
                         <Table.Tr key={item.id}>
+                          {reviewable && (
+                            <Table.Td>
+                              <Checkbox
+                                aria-label={`Post ${shortSha} to #${item.work_item_id ?? '?'}`}
+                                checked={item.action === 'would_post'}
+                                disabled={item.action !== 'would_post' && item.action !== 'excluded'}
+                                onChange={(event) =>
+                                  setSelected.mutate(
+                                    { itemId: item.id, selected: event.currentTarget.checked },
+                                    { onError: showError },
+                                  )
+                                }
+                              />
+                            </Table.Td>
+                          )}
                           <Table.Td>
                             {link ? (
                               <Anchor href={link} target="_blank" rel="noreferrer" title={item.commit_sha}>
@@ -267,18 +359,43 @@ export function RunDetailPage() {
                             </Text>
                           </Table.Td>
                           <Table.Td>
-                            {item.work_item_id === null ? (
-                              '—'
-                            ) : azureConnection ? (
-                              <Anchor
-                                href={workItemUrl(azureConnection, item.work_item_id)}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                #{item.work_item_id}
-                              </Anchor>
-                            ) : (
-                              `#${item.work_item_id}`
+                            <Group gap={6} wrap="nowrap">
+                              {item.work_item_id === null ? (
+                                !picking && '—'
+                              ) : azureConnection ? (
+                                <Anchor
+                                  href={workItemUrl(azureConnection, item.work_item_id)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  #{item.work_item_id}
+                                </Anchor>
+                              ) : (
+                                `#${item.work_item_id}`
+                              )}
+                              {item.manual && (
+                                <Badge size="xs" variant="outline" tt="none">
+                                  linked
+                                </Badge>
+                              )}
+                              {linkable && !picking && (
+                                <Button
+                                  size="compact-xs"
+                                  variant="subtle"
+                                  aria-label={`Change the work item of ${shortSha}`}
+                                  onClick={() => setEditing(item.id)}
+                                >
+                                  Change
+                                </Button>
+                              )}
+                            </Group>
+                            {picking && project.data && (
+                              <WorkItemPicker
+                                projectId={project.data.id}
+                                label={`Work item for ${shortSha}`}
+                                autoFocus={editing === item.id}
+                                onPick={(workItemId) => pick(item, workItemId)}
+                              />
                             )}
                           </Table.Td>
                           <Table.Td>

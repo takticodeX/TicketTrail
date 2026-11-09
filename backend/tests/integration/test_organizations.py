@@ -448,7 +448,7 @@ def test_moving_a_personal_project_into_the_organization(
 ) -> None:
     project = create_project(client, ben.headers, name="Ben's app")
     moved = client.post(
-        f"{API}/projects/{project['id']}/move",
+        f"{API}/projects/{project['id']}/owner",
         headers=ben.headers,
         json={"organization_id": org["id"]},
     )
@@ -479,7 +479,7 @@ def test_connections_still_used_personally_are_copied_into_the_organization(
         azure_connection_id=first["azure_connection_id"],
     )
     moved = client.post(
-        f"{API}/projects/{first['id']}/move",
+        f"{API}/projects/{first['id']}/owner",
         headers=ada.headers,
         json={"organization_id": org["id"]},
     ).json()
@@ -492,7 +492,7 @@ def test_moving_into_an_organization_you_are_not_in(
 ) -> None:
     project = create_project(client, eve.headers)
     response = client.post(
-        f"{API}/projects/{project['id']}/move",
+        f"{API}/projects/{project['id']}/owner",
         headers=eve.headers,
         json={"organization_id": org["id"]},
     )
@@ -503,9 +503,10 @@ def test_admins_move_a_project_out_to_a_member(
     client: TestClient, ada: Person, ben: Person, eve: Person, org: dict[str, Any]
 ) -> None:
     project = org_project(client, ada, org, org_connections(client, ada, org))
-    url = f"{API}/projects/{project['id']}/move"
+    url = f"{API}/projects/{project['id']}/owner"
     assert client.post(url, headers=ben.headers, json={"to_user_id": ben.id}).status_code == 403
-    assert client.post(url, headers=ada.headers, json={"to_user_id": eve.id}).status_code == 422
+    # Outside the organization: only an administrator of the instance.
+    assert client.post(url, headers=ada.headers, json={"to_user_id": eve.id}).status_code == 403
     moved = client.post(url, headers=ada.headers, json={"to_user_id": ben.id})
     assert moved.status_code == 200, moved.text
     assert role_of(client, ben, project["id"]) == "owner"
@@ -519,13 +520,12 @@ def test_move_needs_exactly_one_target(
     client: TestClient, ada: Person, org: dict[str, Any]
 ) -> None:
     project = create_project(client, ada.headers)
-    url = f"{API}/projects/{project['id']}/move"
+    url = f"{API}/projects/{project['id']}/owner"
     assert client.post(url, headers=ada.headers, json={}).status_code == 422
     both = {"organization_id": org["id"], "to_user_id": ada.id}
     assert client.post(url, headers=ada.headers, json=both).status_code == 422
-    assert code(client.post(url, headers=ada.headers, json={"to_user_id": ada.id})) == (
-        "not_in_organization"
-    )
+    already = client.post(url, headers=ada.headers, json={"to_user_id": ada.id})
+    assert already.status_code == 422  # already the owner
 
 
 # --- Deleting --------------------------------------------------------------------------------
@@ -576,7 +576,7 @@ def test_admin_sees_organizations_and_names_an_admin(
     assert [a["email"] for a in promoted["admins"]] == ["ben@example.com"]
 
 
-def test_admin_project_list_shows_organizations_and_refuses_their_transfer(
+def test_admin_project_list_shows_organizations_and_changes_their_owner(
     client: TestClient, root: Person, ada: Person, ben: Person, org: dict[str, Any]
 ) -> None:
     project = org_project(client, ada, org, org_connections(client, ada, org))
@@ -593,12 +593,15 @@ def test_admin_project_list_shows_organizations_and_refuses_their_transfer(
         ("Ben's", "ben@example.com", None),
         ("Shop", None, "Acme"),
     ]
-    refused = client.post(
-        f"{API}/admin/projects/{project['id']}/transfer",
+    # An administrator changes the owner of any project, an organization's included.
+    moved = client.post(
+        f"{API}/projects/{project['id']}/owner",
         headers=root.headers,
         json={"to_user_id": ben.id},
     )
-    assert code(refused) == "organization_project"
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["from_organization"]["name"] == "Acme"
+    assert moved.json()["to_user"]["email"] == "ben@example.com"
 
 
 def test_transfer_everything_leaves_organization_rows_alone(
@@ -615,3 +618,33 @@ def test_transfer_everything_leaves_organization_rows_alone(
     ).json()
     assert [c["name"] for c in org_git["items"]] == ["Acme repo"]
     assert AZURE_PAT not in str(transfer)
+
+
+def test_the_previous_owner_stays_editor_when_an_admin_moves_their_project(
+    client: TestClient, root: Person, ada: Person, eve: Person, org: dict[str, Any]
+) -> None:
+    project = create_project(client, eve.headers, name="Eve's app")  # eve: not a member
+    moved = client.post(
+        f"{API}/projects/{project['id']}/owner",
+        headers=root.headers,
+        json={"organization_id": org["id"]},
+    )
+    assert moved.status_code == 200, moved.text
+    assert role_of(client, eve, project["id"]) == "editor"
+    assert role_of(client, ada, project["id"]) == "owner"  # admin of the organization
+
+
+def test_owner_changes_are_in_one_history(
+    client: TestClient, root: Person, ben: Person, org: dict[str, Any]
+) -> None:
+    project = create_project(client, ben.headers, name="Ben's app")
+    client.post(
+        f"{API}/projects/{project['id']}/owner",
+        headers=ben.headers,
+        json={"organization_id": org["id"]},
+    )
+    history = client.get(f"{API}/admin/transfers", headers=root.headers).json()["items"]
+    assert [
+        (t["actor"]["email"], t["from_user"]["email"], t["to_organization"]["name"])
+        for t in history
+    ] == [("ben@example.com", "ben@example.com", "Acme")]

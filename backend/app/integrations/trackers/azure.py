@@ -22,6 +22,7 @@ from app.integrations.trackers.base import (
     TrackerError,
     TrackerNotFoundError,
     TrackerTransientError,
+    TrackerWorkItem,
 )
 from app.integrations.trackers.limits import ConcurrencyLimiter, NoLimit
 
@@ -37,6 +38,10 @@ MAX_ATTEMPTS = 5
 MAX_BACKOFF_SECONDS = 60.0
 EXISTENCE_BATCH = 200
 RETRY_STATUSES = {429, 503}
+# How many recently changed matches a search looks at before putting open items first.
+SEARCH_CANDIDATES = 200
+# States that mean "done" across the Agile, Scrum, CMMI and Basic processes.
+CLOSED_STATES = {"closed", "done", "removed", "resolved", "completed", "cut"}
 
 
 def _auth_header(pat: str) -> str:
@@ -208,3 +213,61 @@ class AzureBoardsClient:
             if not token:
                 return comments
             params = {**params, "continuationToken": str(token)}
+
+    def search_work_items(self, text: str, *, limit: int = 50) -> list[TrackerWorkItem]:
+        """Work items whose title contains `text` (or with that ID), open ones first.
+
+        Without text: the most recently changed work items. Closed ones come last.
+        """
+        conditions = ["[System.TeamProject] = @project"]
+        text = text.strip()
+        if text:
+            match = f"[System.Title] CONTAINS '{text.replace(chr(39), chr(39) * 2)}'"
+            number = text.lstrip("#")
+            if number.isdigit():
+                match = f"([System.Id] = {int(number)} OR {match})"
+            conditions.append(match)
+        # WIQL, not SQL: the only user text is inside a string literal, quotes doubled.
+        query = (
+            "SELECT [System.Id] FROM WorkItems WHERE "  # noqa: S608
+            + " AND ".join(conditions)
+            + " ORDER BY [System.ChangedDate] DESC"
+        )
+        body = self._json(
+            "POST",
+            f"{self._org_url}/{self._project_path}/_apis/wit/wiql",
+            params={"api-version": API_VERSION, "$top": str(SEARCH_CANDIDATES)},
+            json={"query": query},
+        )
+        refs = body.get("workItems", []) if isinstance(body, dict) else []
+        ids = [r["id"] for r in refs if isinstance(r, dict) and isinstance(r.get("id"), int)]
+        ids = ids[:SEARCH_CANDIDATES]
+        if not ids:
+            return []
+        details = self._json(
+            "GET",
+            f"{self._org_url}/{self._project_path}/_apis/wit/workitems",
+            params={
+                "ids": ",".join(map(str, ids)),
+                "fields": "System.Id,System.Title,System.WorkItemType,System.State",
+                "errorPolicy": "omit",
+                "api-version": API_VERSION,
+            },
+        )
+        by_id: dict[int, TrackerWorkItem] = {}
+        for item in details.get("value", []) if isinstance(details, dict) else []:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), int):
+                continue
+            raw = item.get("fields")
+            fields: dict[str, Any] = raw if isinstance(raw, dict) else {}
+            state = str(fields.get("System.State") or "")
+            by_id[item["id"]] = TrackerWorkItem(
+                id=item["id"],
+                title=str(fields.get("System.Title") or ""),
+                type=str(fields.get("System.WorkItemType") or ""),
+                state=state,
+                closed=state.lower() in CLOSED_STATES,
+            )
+        ordered = [by_id[i] for i in ids if i in by_id]
+        # Stable: the most recently changed first within open, then within closed.
+        return sorted(ordered, key=lambda w: w.closed)[:limit]

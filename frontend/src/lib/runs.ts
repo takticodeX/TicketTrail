@@ -30,6 +30,7 @@ export const ACTION_LABELS: Record<ItemAction, string> = {
   skipped_not_found: 'Work item not found',
   no_reference: 'No reference',
   error: 'Error',
+  excluded: 'Deselected',
 };
 
 export const ACTION_COLORS: Record<ItemAction, string> = {
@@ -39,6 +40,7 @@ export const ACTION_COLORS: Record<ItemAction, string> = {
   skipped_not_found: 'orange',
   no_reference: 'gray',
   error: 'red',
+  excluded: 'gray',
 };
 
 /** The order of the filter buttons on the run page. */
@@ -48,6 +50,7 @@ export const ACTION_ORDER: ItemAction[] = [
   'no_reference',
   'skipped_duplicate',
   'skipped_not_found',
+  'excluded',
   'error',
 ];
 

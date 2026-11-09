@@ -45,7 +45,7 @@ def anna(client: TestClient, admin: Person) -> Person:
 
 def transfer_project(client: TestClient, admin: Person, project_id: str, to: Person) -> Any:
     return client.post(
-        f"{API}/admin/projects/{project_id}/transfer",
+        f"{API}/projects/{project_id}/owner",
         headers=admin.headers,
         json={"to_user_id": to.id},
     )
@@ -90,7 +90,8 @@ def test_only_admins_can_transfer(
     for method, path in [
         ("GET", "/admin/projects"),
         ("GET", "/admin/transfers"),
-        ("POST", f"/admin/projects/{project['id']}/transfer"),
+        # Giving a personal project to another user takes an administrator.
+        ("POST", f"/projects/{project['id']}/owner"),
         ("POST", f"/admin/users/{marco.id}/transfer"),
     ]:
         response = client.request(
@@ -118,7 +119,7 @@ def test_transfer_everything_when_a_colleague_leaves(
     assert (transfer["projects_moved"], transfer["connections_moved"]) == (1, 3)
     assert transfer["connections_copied"] == 0
     assert transfer["from_user"]["email"] == marco.email
-    assert transfer["admin"]["email"] == admin.email
+    assert transfer["actor"]["email"] == admin.email
 
     assert names(client, anna, "projects") == ["Billing"]
     assert names(client, anna, "git-connections") == ["App repo", "Spare repo"]
@@ -202,7 +203,7 @@ def test_transfer_errors(client: TestClient, admin: Person, marco: Person, anna:
     project = create_project(client, marco.headers)
     unknown = "00000000-0000-0000-0000-000000000000"
     response = client.post(
-        f"{API}/admin/projects/{project['id']}/transfer",
+        f"{API}/projects/{project['id']}/owner",
         headers=admin.headers,
         json={"to_user_id": unknown},
     )

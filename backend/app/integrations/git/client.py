@@ -277,3 +277,14 @@ class GitClient:
             args.append(f"--since={since.isoformat()} 00:00:00 +0000")
         output = self._run(*args, revision, "--", cwd=path)
         return [_parse_commit(record) for record in output.split(_RECORD_END) if record.strip()]
+
+    def read_commits(self, path: Path, shas: list[str]) -> dict[str, Commit]:
+        """The given commits by SHA; those not in the repository are left out."""
+        present = [sha for sha in dict.fromkeys(shas) if self.has_commit(path, sha)]
+        if not present:
+            return {}
+        output = self._run(
+            "log", "--no-walk=unsorted", "--no-color", f"--format={_LOG_FORMAT}", *present, cwd=path
+        )
+        commits = [_parse_commit(r) for r in output.split(_RECORD_END) if r.strip()]
+        return {commit.sha: commit for commit in commits}
