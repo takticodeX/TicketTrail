@@ -9,7 +9,7 @@ TicketTrail is a Dockerized, multi-user web app. It reads commits from any Git r
 **Goals**
 
 - Each user manages their own **projects**. A project pairs one Git connection with one Azure DevOps board.
-- A project can be **shared** with other users as viewer or editor, or belong to an **organization** (a team) instead of a user (section 4, *Access rules*). An administrator can transfer personal projects to another owner, for example when a colleague leaves.
+- A project can be **shared** with other users as viewer or editor, or belong to an **organization** (a team) instead of a user (section 4, *Access rules*). The owner (or an administrator) can give a project to another owner, for example when a colleague leaves.
 - Git access works with any HTTPS Git host: Azure Repos (the first target), GitHub, GitLab, Bitbucket, Gitea and self-hosted servers.
 - Ticket references are found with a regex pattern set per project. The default is `AB#(\d+)`.
 - A sync can run on demand ("Sync now") or on a schedule set per project.
@@ -86,12 +86,14 @@ Connections and projects belong to a user (`owner_id`) or to an organization (`o
 | `projects` | `owner_id` or `organization_id`, `name` (unique per owner), `git_connection_id`, `azure_connection_id`, `branches` (text\[\]; empty = default branch only), `ticket_pattern` (default `AB#(\d+)`), `comment_template`, `start_from` (date or SHA), `include_merge_commits` (bool, default false), `schedule_cron` (nullable), `schedule_enabled`, `schedule_last_fired_at`, `dry_run_default` | One repo → one board. `schedule_last_fired_at` makes each schedule slot fire once (section 7) |
 | `project_shares` | `project_id`, `user_id`, `role` (`viewer` \| `editor`) | **Unique (`project_id`, `user_id`)**. Deleted with the project or the user |
 | `sync_runs` | `project_id`, `trigger` (`manual` \| `scheduled`), `dry_run`, `status` (`queued` \| `running` \| `success` \| `partial` \| `failed` \| `skipped` \| `cancelled`), `started_at`, `finished_at`, `commits_scanned`, `comments_posted`, `skipped`, `errors`, `error_message`, `cancel_requested`, `triggered_by_id` (nullable) | One row per sync run. `triggered_by_id` is the user who started a manual run; null for scheduled runs |
-| `sync_run_items` | `sync_run_id`, `position`, `commit_sha`, `commit_subject`, `branch`, `work_item_id`, `action` (`posted` \| `would_post` \| `skipped_duplicate` \| `skipped_not_found` \| `no_reference` \| `error`), `detail` | The audit trail shown in the UI. `position` orders the items (oldest commit first) |
+| `sync_run_items` | `sync_run_id`, `position`, `commit_sha`, `commit_subject`, `branch`, `work_item_id`, `action` (`posted` \| `would_post` \| `skipped_duplicate` \| `skipped_not_found` \| `no_reference` \| `error` \| `excluded`), `detail`, `manual` | The audit trail shown in the UI. `position` orders the items (oldest commit first); `manual` marks a work item linked by hand; `excluded` a pair deselected in a review |
+| `commit_links` | `project_id`, `commit_sha`, `work_item_id`, `created_by_id` | **Unique (`project_id`, `commit_sha`, `work_item_id`)**. A work item linked to a commit by hand in a review: every run treats it as if the message referenced it |
+| `commit_exclusions` | `project_id`, `commit_sha`, `work_item_id`, `created_by_id` | **Unique (`project_id`, `commit_sha`, `work_item_id`)**. A pair deselected in a review: no run ever posts it (recorded as `excluded`) |
 | `posted_comments` | `project_id`, `commit_sha`, `work_item_id`, `azure_comment_id`, status (pending \| posted), `posted_at` | **Unique (`project_id`, `commit_sha`, `work_item_id`)**: this is what guarantees a commit is never posted twice |
 | `project_cursors` | `project_id`, `branch`, `last_sha` | Where the last successful sync stopped on each branch |
 | `refresh_tokens` | `user_id`, `token_hash`, `expires_at`, `revoked`, `revoked_at` | Lets sessions be revoked. `revoked_at` gives a rotated token a short grace period (section 10) |
 | `audit_events` | `actor_id` (nullable), `actor_email`, `action` (e.g. `update`, `delete`, `sync`, `share`), `resource_type` (`project` \| `run` \| `git_connection` \| `azure_connection` \| `organization`), `resource_id`, `resource_name`, `owner_label` | What administrators did to anything not personally theirs. Names and owners are copied, so entries stay readable after the resource is gone |
-| `ownership_transfers` | `admin_id`, `from_user_id`, `to_user_id`, `project_id` (null when everything was moved), `projects_moved`, `connections_moved`, `connections_copied`, `summary` | Audit trail of the administrator's transfers |
+| `ownership_transfers` | `actor_id`, `from_user_id` or `from_organization_id`, `to_user_id` or `to_organization_id`, `project_id` (null when everything a user owned was moved), `projects_moved`, `connections_moved`, `connections_copied`, `summary` | History of owner changes (**Change owner** and **Transfer all**) |
 
 `posted_comments` is the source of truth for de-duplication. `project_cursors` is only an optimization so the app doesn't rescan the whole history. If the cursors are deleted, a full rescan still posts nothing twice. Deleting runs from the history never affects `posted_comments`.
 
@@ -108,10 +110,10 @@ Personal connections are private to their owner; an organization's connections a
 | See the project, its runs and their items; test the pattern | ✓ | ✓ | ✓ |
 | Start a dry run | ✓ | ✓ | ✓ |
 | Cancel or delete a dry run they started themselves | ✓ | ✓ | ✓ |
-| Start a real sync; cancel or delete any run; clear the history | | ✓ | ✓ |
+| Start a real sync; review a dry run (deselect, link work items) and post the selection; cancel or delete any run; clear the history | | ✓ | ✓ |
 | Change the settings: name, branches, pattern, template, start point, merge commits, schedule, dry-run default | | ✓ | ✓ |
 | Change the Git or Azure connection | | | ✓ |
-| Share the project, change or remove shares, delete the project | | | ✓ |
+| Share the project, change or remove shares, change the owner, delete the project | | | ✓ |
 
 - A user with no access gets **404**, as if the project didn't exist. A user with access but too weak a role gets **403** with the code `insufficient_role`.
 - Shared users never see or use the owner's connections directly. A project response carries secret-free summaries of its connections (name, repo URL, host, commit link pattern; organization URL and Azure project), so the UI can show them.
@@ -121,14 +123,14 @@ Personal connections are private to their owner; an organization's connections a
 - Anyone a personal project is shared with can leave it. Removing someone from an organization (or their leaving it) also deletes their shares on its projects.
 - **Administrators of the instance may do everything.** They open any project with the owner role (a project response says `admin_access: true` when only that gives the access), read, test, change and delete any connection, and act as an admin of every organization. Secrets stay write-only for them too: they can replace a token, never read it. Their own project list (the dashboard) still holds only their own, their organizations' and their shared projects; everything else is reached from the admin pages.
 - Whatever an administrator does to anything that isn't personally theirs (anything but reading: changes, syncs, run deletions, shares, moves, deletions, organization management), however they reach it (being an administrator, a share, or an organization they belong to), is recorded as an `audit_events` row in the same transaction as the action, and logged by the `app.audit` logger once committed. An action that fails leaves neither.
-- Administrators also transfer personal projects (section 8) and can make a member the admin of an organization left without one.
+- Administrators can also give any project to any organization or active user (**Change owner**), give everything a user owns personally to another user (**Transfer all**), and make a member the admin of an organization left without one.
 
 **Organizations**
 
 - Anyone can create an organization and becomes its first admin. Its time zone defaults to the creator's.
 - Admins add members by exact email, change roles and remove members; anyone can leave. The last admin can neither leave nor step down.
 - Members see each other (name and email), so a project can be shared with a member by name.
-- A personal project moves into an organization (its owner, who must be a member); an organization's project moves out to a member (its admins). The connections come along, copied when the previous owner still uses them elsewhere; a non-admin who moves a project in stays its editor.
+- **Change owner** is the one way a project changes hands. Whoever has the owner role gives it to an organization they belong to, or to a member of the project's organization; administrators to any organization or active user. The connections come along, copied when the previous owner still uses them elsewhere; a previous personal owner who isn't an admin of the receiving organization stays its editor. Every change is recorded in `ownership_transfers`.
 - An organization can be deleted only when it owns no projects and no connections.
 
 ## 5. Git integration and ticket parsing
@@ -180,6 +182,7 @@ TicketTrail calls the Azure DevOps REST API with a PAT, using the header `Author
 | Test connection | `GET {org_url}/_apis/projects/{project}?api-version=7.1` |
 | Check work items exist (batched, up to 200 IDs) | `GET {org_url}/{project}/_apis/wit/workitems?ids=1,2,3&fields=System.Id,System.Title,System.WorkItemType&errorPolicy=omit&api-version=7.1` |
 | Add comment | `POST {org_url}/{project}/_apis/wit/workItems/{id}/comments?format=markdown&api-version=7.1-preview.4`, body `{"text": "…"}` |
+| Search work items (the review's picker) | `POST {org_url}/{project}/_apis/wit/wiql?api-version=7.1&$top=200` with a WIQL query (title contains the text, or the ID), then the batch call above with `System.Title`, `System.WorkItemType`, `System.State`; closed, done and removed items are listed last |
 | Read comments (only to recover after a crash) | `GET {org_url}/{project}/_apis/wit/workItems/{id}/comments?api-version=7.1-preview.4` |
 
 Reference: [Comments – Add Work Item Comment](https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/comments/add-work-item-comment?view=azure-devops-rest-7.1). The comments API is still marked *preview*, so keep the `api-version` in one constant.
@@ -234,7 +237,7 @@ A sync run is one Celery task, `sync_project(project_id, trigger, dry_run, run_i
 1. Take a Redis lock `tt:sync:<project_id>` (value: the run ID) with a 30-minute time-to-live, refreshed by the run's heartbeat. If the lock is already held, mark the new run `skipped` and stop. Only one run (real or dry) per project at a time.
 2. Set the run to `running`. Decrypt the credentials in memory only.
 3. Fetch the repo and list the new commits (section 5).
-4. Extract the work item IDs from each commit. Commits with no match are recorded as `no_reference`.
+4. Extract the work item IDs from each commit, add the work items linked to it by hand (`commit_links`), and set apart the pairs deselected in a review (`commit_exclusions`, recorded as `excluded`). Commits with no work item at all are recorded as `no_reference`.
 5. Remove pairs that are already in `posted_comments` with status `posted`. Record them as `skipped_duplicate`.
 6. Check that the remaining IDs exist, in batches. Missing IDs are recorded as `skipped_not_found`.
 7. For each pair (commit, work item), oldest commit first:
@@ -283,7 +286,7 @@ The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoin
 | POST | `/projects/{id}/sync` | Body `{dry_run?: bool}` (default: the project's `dry_run_default`). Returns `202` with `{run_id}`. Dry run: viewer; real sync: editor |
 | GET | `/projects/{id}/runs` | Paginated run history, newest first |
 | DELETE | `/projects/{id}/runs` | Editor: delete the finished runs, optionally only `?dry_run=true\|false`. Returns `{deleted}` |
-| POST | `/projects/{id}/move` | Owner role: body `{organization_id}` (a personal project into an organization the caller belongs to) or `{to_user_id}` (an organization's project to one of its active members). Returns `{project_id, summary}` |
+| POST | `/projects/{id}/owner` | Owner role: body `{organization_id}` or `{to_user_id}` (**Change owner**, see section 4). 403 when a non-administrator gives a project to someone outside its organization. Returns the recorded owner change |
 | GET / POST | `/organizations` | The caller's organizations (with their role and counts) / create one (anyone; the creator becomes admin) |
 | GET / PATCH / DELETE | `/organizations/{id}` | Read (members) / rename or change the time zone (admins) / delete (admins, only when it owns nothing: 409 `organization_not_empty`) |
 | GET / POST | `/organizations/{id}/members` | List (members) / add `{email, role}` (admins) |
@@ -292,20 +295,23 @@ The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoin
 | PATCH / DELETE | `/projects/{id}/shares/{user_id}` | Owner: change the role / remove the share. A user can also delete their own share (leave) |
 | GET | `/runs/{run_id}` | Run detail with counters and `counts_by_action` |
 | GET | `/runs/{run_id}/items` | Paginated items, oldest commit first, filterable by `action` |
+| GET | `/projects/{id}/work-items?q=` | Editor: the board's work items for the review's picker (`{ok, items[{id, title, type, state, closed}], error}`), open first. Runs in the worker |
+| PUT | `/runs/{run_id}/items/{item_id}/work-item` | Editor, finished dry run: body `{work_item_id}`. The row now posts to that work item, and the commit is linked to it (`commit_links`); the row's previous work item is excluded for that commit (or unlinked, if it was linked by hand) |
+| POST / DELETE | `/runs/{run_id}/items/{item_id}/exclude` | Editor, finished dry run: deselect a `would_post` row for good (`commit_exclusions`) / select it again |
+| POST | `/runs/{run_id}/post` | Editor, finished dry run: **Post selected**. Queues a real run (`source_run_id` = the dry run) that posts exactly its `would_post` rows, without a rescan and without moving cursors. Returns `202 {run_id}` |
 | POST | `/runs/{run_id}/cancel` | Cooperative cancel: the worker checks a flag between commits. 409 if already finished |
 | DELETE | `/runs/{run_id}` | Delete a finished run and its items (409 while active) |
 | GET | `/admin/users` · PATCH `/admin/users/{id}` | Admin only: list users (with their project count), turn accounts on or off |
 | GET | `/admin/projects` | Admin only: every project with its owner, share count and last run (`?owner_id=` to filter). No settings |
-| POST | `/admin/projects/{id}/transfer` | Admin only: body `{to_user_id}`. Gives the project and its connections to an active user; a connection the previous owner still uses elsewhere is copied |
 | POST | `/admin/users/{id}/transfer` | Admin only: body `{to_user_id}`. Gives everything the user owns personally (projects and connections) to an active user; organizations' rows stay |
 | GET | `/admin/organizations` | Admin only: every organization with its members, admins and counts |
 | GET | `/admin/activity` | Admin only: the `audit_events`, newest first (`?actor_id=` to filter) |
 | GET | `/admin/git-connections` · `/admin/azure-connections` | Admin only: every connection with its owner (user or organization) and the number of projects using it. Secrets stay write-only |
 | POST | `/admin/organizations/{id}/admins` | Admin only: body `{user_id}`, a member who becomes an admin of the organization |
-| GET | `/admin/transfers` | Admin only: the transfer history, newest first |
+| GET | `/admin/transfers` | Admin only: every owner change (Change owner and Transfer all), newest first, with who did it and from/to which user or organization |
 | GET | `/health` · `/ready` | Liveness / readiness (database, Redis) |
 
-Run actions follow the access rules: cancel and delete need an editor, except a viewer's own dry runs. The administrator's project transfer refuses an organization's project (409 `organization_project`): its admins move it. Transfers keep secrets encrypted as they are, carry the run history and posted comments along, drop a share the new owner had on the project, and add a suffix such as "(from Marco)" to names the new owner already uses.
+Run actions follow the access rules: cancel and delete need an editor, except a viewer's own dry runs. Owner changes keep secrets encrypted as they are, carry the run history and posted comments along, drop a share the new owner had on the project, and add a suffix such as "(from Marco)" to names the new owner already uses.
 
 Errors use one shape: `{"error": {"code": "string", "message": "human readable", "details": {}}}`. List endpoints take `?page=&page_size=` (default 25, max 100).
 
@@ -317,14 +323,14 @@ The UI is a responsive single-page app with light and dark themes. Everything a 
 | --- | --- | --- |
 | Login / Register | `/login`, `/register` | Email + password. Register is hidden when registration is turned off |
 | Dashboard | `/` | One card per project: last run status and time, next scheduled run, comments posted, and **Sync now** / **Dry run** buttons. Projects shared with the user appear under **Shared with me**, with their role and owner |
-| Project detail | `/projects/:id` | Run history table (who started each manual run), **Delete** per run and **Clear dry runs**. **Share** (owner) opens a drawer to share by email, change roles and remove shares; **Leave** (shared users). Click a run to open its item list (commit SHA, message subject, work item ID with a link to Azure, action, detail), with filters by action, **Cancel** and **Delete** |
+| Project detail | `/projects/:id` | Run history table (who started each manual run), **Delete** per run and **Clear dry runs**. **Share** (owner) opens a drawer to share by email, change roles and remove shares; **Change owner** (owner) gives it to an organization or a user; **Leave** (shared users). Click a run to open its item list (commit SHA, message subject, work item ID with a link to Azure, action, detail), with filters by action, **Cancel** and **Delete**. On a finished dry run, editors review it: a checkbox per row (untick = never post), a searchable work item picker for rows without a work item or with a wrong one (**Change**), and **Post selected (N)** |
 | Settings → Git connections | `/settings/git` | List plus a form: name, repo URL, auth type, username (prefilled for the detected host), token or password, commit URL template, **Test connection** (shows the branches found) |
 | Settings → Azure connections | `/settings/azure` | List plus a form: name, organization URL, project, PAT, **Test connection** |
 | Settings → Projects | `/settings/projects`, `/settings/projects/new`, `/settings/projects/:id` | List of the projects the user can see, then the wizard: pick a Git connection → branches → pick an Azure connection → ticket pattern with **live pattern tester** → comment template with **live preview** → start point → schedule. For an editor the connections are locked; a viewer is told only editors can change the settings |
 | Settings → Organizations | `/settings/organizations`, `/settings/organizations/:id` | The user's organizations and **New organization**. An organization's page: name and time zone (admins), members (add by email, roles, remove, leave), its Git and Azure connections (admins add, edit, delete), its projects and **New project** |
 | Settings → Profile | `/settings/profile` | Display name, time zone, change password |
 | Admin → Users | `/admin/users` | Admins only: list users, turn accounts on or off, **Transfer all** of a user's projects and connections |
-| Admin → Projects | `/admin/projects` | Admins only: every project with its owner (a user or an organization), a link to open it with full rights, **Transfer** of personal projects to another user, and the transfer history |
+| Admin → Projects | `/admin/projects` | Admins only: every project with its owner (a user or an organization), a link to open it with full rights, **Change owner**, and the transfer history |
 | Admin → Activity | `/admin/activity` | Admins only: what administrators did to other users' data (when, who, action, resource with a link while it exists, owner) |
 | Admin → Connections | `/admin/connections` | Admins only: every Git and Azure connection with its owner, to edit (and test), or delete |
 | Admin → Organizations | `/admin/organizations` | Admins only: every organization with its admins, a link to manage it as its admin; **Make admin** for a member |
@@ -365,6 +371,8 @@ tickettrail/
 ├── .env.example
 ├── README.md
 ├── .github/workflows/ci.yml    # lint, types, tests, image build, e2e, secret-leak check
+├── .github/workflows/release.yml # on a vX.Y.Z tag: images to ghcr.io, GitHub Release
+├── CHANGELOG.md
 ├── scripts/secret-leak-check.sh
 ├── backend/
 │   ├── Dockerfile
@@ -409,6 +417,8 @@ tickettrail/
 | `TT_LOG_LEVEL` | `INFO` | Logging level; logs are JSON |
 | `TT_PUBLIC_URL` | `http://localhost:8080` | Used in links and cookies |
 | `TT_HTTP_PORT` | `8080` | Compose only: the host port the frontend publishes |
+| `TT_IMAGE_PREFIX` | `localhost/tickettrail` | Compose only: where the images come from; `ghcr.io/takticodex/tickettrail` runs a published release |
+| `TT_VERSION` | `latest` | Compose only: the image tag, for example `0.3.0` |
 
 Volumes: `pg_data` (database) and `repos_data` (Git clones). Only `frontend` publishes a port (8080 by default). TLS is expected from a reverse proxy in front of the stack.
 
@@ -510,7 +520,7 @@ Volumes: `pg_data` (database) and `repos_data` (Git clones). Only `frontend` pub
     - `organizations` and `organization_members`; projects and connections owned by a user or an organization; roles derived from membership (admins: owner; members: viewer, raised by shares).
     - Organization and member endpoints, organization connections, projects created in or moved into and out of an organization, schedules in the organization's time zone.
     - Admin: organizations' projects in the project list (not transferable), the organization list and **Make admin**.
-    - UI: Settings → Organizations and an organization's page, the Owner choice in the wizard, **Move to an organization** / **Move to a member**, member picker in the Share drawer, one dashboard section per organization, Admin → Organizations.
+    - UI: Settings → Organizations and an organization's page, the Owner choice in the wizard, moving projects into and out of an organization (since M9: **Change owner**), member picker in the Share drawer, one dashboard section per organization, Admin → Organizations.
   - *Accept when:*
     - A member sees the organization's projects as viewer and becomes editor through a share; admins own every project; outsiders get 404.
     - Members use and test the organization's connections without seeing tokens; only admins change them.
@@ -521,6 +531,12 @@ Volumes: `pg_data` (database) and `repos_data` (Git clones). Only `frontend` pub
   - *Accept when:* an administrator syncs, edits, shares and deletes another user's project and edits or deletes their connections; their dashboard lists only their own projects; tokens never appear in any response; each such action is in the audit log; regular users still get 404.
 - **Activity page** *(done)*: `audit_events`, `GET /admin/activity` and Admin → Activity, replacing the logs as the place to read what administrators did.
 - Out of scope: instance-wide visibility for regular users, and public links.
+
+**M9 – Simpler ownership, reviewed dry runs, releases**
+
+- **Change owner** *(done)*: one action replaces the administrator's project transfer and the users' "move into / out of an organization": `POST /projects/{id}/owner`, one dialog, one history of owner changes (users and organizations). One "who can do what" table in the README.
+- **Dry-run review** *(done)*: a checkbox per row (deselecting excludes the pair for good, `commit_exclusions`), a work item picker searching the board (closed items last) for rows without a work item or with a wrong one (`commit_links`, used by every later run), and **Post selected**, a real run posting exactly the reviewed rows without a rescan. Sync now and scheduled syncs are unchanged but respect links and exclusions.
+- **Releases** *(done)*: a tag `vX.Y.Z` on `main` runs `.github/workflows/release.yml`, which builds the images, pushes them to `ghcr.io/takticodex/tickettrail-backend` / `-frontend` (version and `latest`), and creates a GitHub Release with the release notes from `CHANGELOG.md` and an offline archive of the images. `TT_IMAGE_PREFIX` and `TT_VERSION` make compose run a release instead of building.
 
 ## 13. Testing and definition of done
 
@@ -546,7 +562,7 @@ A milestone is done only when its acceptance criteria are met, its tests pass in
   - each case asserts exactly one comment per pair
 - **Isolation suite:** for every endpoint, check that a second user gets 404 on the first user's resources.
 - **Access suite:** for each role, check what it may and may not do (section 4), plus the share endpoints, the administrator's full access (and its audit log) and transfers.
-- **End to end (Playwright):** register → create both connections → create a project → dry run → real sync (Azure mocked) → see the history → share the project with a viewer → create an organization with the viewer as a member and move the project into it; the viewer finds it in the organization's section, starts a dry run and can't sync.
+- **End to end (Playwright):** register → create both connections → create a project → dry run → review (deselect a commit) → Post selected (Azure mocked) → see the history → a later sync posts nothing new and never the deselected commit → share the project with a viewer → create an organization with the viewer as a member and move the project into it; the viewer finds it in the organization's section, starts a dry run and can't sync.
 
 **Quality bar**
 
@@ -576,3 +592,6 @@ Decisions taken at the milestone gates, already reflected in the sections above.
 | M8/S2 | Organizations: members are viewers by default, raised to editor per project with a share | Least privilege by default; editing rights are given project by project |
 | M8/S3 | Administrators see and may do everything (replacing "administrators don't see users' data"); tokens stay write-only; their actions on others' data are logged | Nothing is out of an administrator's reach; secrets still never leave the server |
 | M8 | Admin → Activity: administrators' actions stored in `audit_events`, not only in the logs | The record survives log rotation and can be read in the UI |
+| M9 | **Change owner** replaces Transfer (admin) and Move (users); `ownership_transfers` records organizations and the actor | Fewer concepts: one way for a project to change hands, one history |
+| M9 | Dry-run review: deselected commits are excluded for good ("never", not "not now"); manual links persist; Post selected posts the reviewed rows without a rescan | A scheduled sync must not undo a review; the review posts exactly what was looked at |
+| M9 | Images are published to ghcr.io and attached to GitHub Releases per tag, not committed to the repository | Image archives are hundreds of MB: in git they would weigh on every clone forever |

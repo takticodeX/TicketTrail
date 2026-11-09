@@ -1,0 +1,100 @@
+name: Release
+
+# Push a tag such as v0.3.0 (matching backend/app/__init__.py) to publish that version:
+# the images go to ghcr.io and a GitHub Release gets an offline archive of them.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write # create the GitHub Release
+  packages: write # push the images to ghcr.io
+
+jobs:
+  release:
+    name: Build and publish the images
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version and image names
+        id: meta
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          app_version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' backend/app/__init__.py)
+          if [ "$app_version" != "$version" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME but backend/app/__init__.py says $app_version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prefix=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/tickettrail" >> "$GITHUB_OUTPUT"
+
+      - name: Build the images
+        env:
+          TT_IMAGE_PREFIX: ${{ steps.meta.outputs.prefix }}
+          TT_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          cp .env.example .env # compose wants the file; nothing secret is built in
+          docker compose build
+
+      - name: Push to ghcr.io
+        env:
+          PREFIX: ${{ steps.meta.outputs.prefix }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for image in backend frontend; do
+            docker tag "$PREFIX-$image:$VERSION" "$PREFIX-$image:latest"
+            docker push "$PREFIX-$image:$VERSION"
+            docker push "$PREFIX-$image:latest"
+          done
+
+      - name: Archive the images (offline install)
+        env:
+          PREFIX: ${{ steps.meta.outputs.prefix }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          docker save "$PREFIX-backend:$VERSION" "$PREFIX-frontend:$VERSION" \
+            | gzip > "tickettrail-images-$VERSION.tar.gz"
+          sha256sum "tickettrail-images-$VERSION.tar.gz" > "tickettrail-images-$VERSION.tar.gz.sha256"
+
+      - name: Release notes
+        env:
+          PREFIX: ${{ steps.meta.outputs.prefix }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          # This version's section of CHANGELOG.md, then how to install it.
+          awk -v head="## [$VERSION]" '
+            index($0, head) == 1 { found = 1; next }
+            found && index($0, "## [") == 1 { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          cat >> notes.md <<EOF
+
+          ## Install this version without building
+
+          \`\`\`sh
+          git clone --depth 1 --branch v$VERSION https://github.com/$GITHUB_REPOSITORY.git
+          cd TicketTrail
+          cp .env.example .env   # set the secrets, see README "First start"
+          echo "TT_IMAGE_PREFIX=$PREFIX" >> .env
+          echo "TT_VERSION=$VERSION" >> .env
+          docker compose up -d
+          \`\`\`
+
+          Offline: download \`tickettrail-images-$VERSION.tar.gz\` below, run
+          \`docker load < tickettrail-images-$VERSION.tar.gz\`, then the same steps.
+          EOF
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "TicketTrail $VERSION" \
+            --notes-file notes.md \
+            "tickettrail-images-$VERSION.tar.gz" \
+            "tickettrail-images-$VERSION.tar.gz.sha256" \
+            docker-compose.yml \
+            .env.example

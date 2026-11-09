@@ -1,6 +1,6 @@
 [project]
 name = "tickettrail"
-version = "0.2.0"
+version = "0.3.0"
 description = "Posts Git commit messages as comments on the Azure DevOps work items they reference."
 requires-python = ">=3.12,<3.13"
 dependencies = [

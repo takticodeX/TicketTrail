@@ -6,7 +6,7 @@
 
 services:
   fixtures:
-    image: localhost/tickettrail-backend:latest
+    image: ${TT_IMAGE_PREFIX:-localhost/tickettrail}-backend:${TT_VERSION:-latest}
     command: python /e2e/server.py
     user: "0"  # writes the CA into the shared certs volume
     volumes:

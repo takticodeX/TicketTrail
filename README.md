@@ -94,6 +94,35 @@ The stack runs six containers: `frontend` (Nginx, the only published port), `api
 `worker`, `scheduler`, `db` (PostgreSQL 16) and `redis`. Database migrations run
 automatically when the `api` container starts.
 
+### Install from a release (no build)
+
+Every version is tagged (`v0.3.0`, …) and published: the images are on
+`ghcr.io/takticodex/tickettrail-backend` and `-frontend`, and each
+[GitHub Release](https://github.com/takticodeX/TicketTrail/releases) carries an offline
+archive of them. To run a release without building:
+
+```sh
+git clone --depth 1 --branch v0.3.0 https://github.com/takticodeX/TicketTrail.git
+cd TicketTrail
+cp .env.example .env    # set the secrets: see "First start" above
+# in .env, uncomment and set:
+#   TT_IMAGE_PREFIX=ghcr.io/takticodex/tickettrail
+#   TT_VERSION=0.3.0
+docker compose up -d
+```
+
+Without internet access on the server, download `tickettrail-images-<version>.tar.gz`
+from the release, run `docker load < tickettrail-images-<version>.tar.gz`, and start the
+same way. To upgrade, change `TT_VERSION` and run `docker compose up -d` again
+(migrations run on start). What changed in each version is in
+[CHANGELOG.md](CHANGELOG.md).
+
+**Publishing a version** (maintainers): bump the version in `backend/app/__init__.py`,
+`backend/pyproject.toml` and `frontend/package.json`, add its section to `CHANGELOG.md`,
+then push a tag `vX.Y.Z` on `main`. The Release workflow builds and pushes the images and
+creates the GitHub Release. The first time, make the two packages public in GitHub
+(Packages → package settings → Change visibility) so anyone can pull them.
+
 ## 2. First steps
 
 1. **Create an account.** The first account registered becomes the **administrator**.
@@ -112,7 +141,25 @@ automatically when the `api` container starts.
    - Set a start point (a date or a commit) unless you want comments on the whole history.
 5. **Open the project** (Dashboard or Settings → Projects → Open) and run a **Dry run**:
    it lists every commit with the work items it would comment on, and changes nothing.
-6. Click **Sync now**. The confirmation shows how many comments the last dry run found.
+6. **Review it** (optional, see below) and click **Post selected**, or click **Sync now**
+   to post everything found. The confirmation shows how many comments the last dry run
+   found.
+
+### Reviewing a dry run
+
+On a finished dry run, editors and owners can decide exactly what gets posted:
+
+- **Untick a commit** to never post it to that work item: neither now nor in any later run,
+  scheduled ones included. Tick it again to undo.
+- **Pick a work item** for a commit that has no reference, or one whose reference is wrong
+  (**Change**). The list searches the board as you type (words of the title, or an ID),
+  shows the type and state of each work item, and lists closed ones last. The link is
+  kept: later runs post the commit to that work item as if its message referenced it.
+- **Post selected** posts the ticked rows as a new run, without scanning the repository
+  again. It is as safe as any run: nothing is ever posted twice.
+
+**Sync now** and scheduled syncs keep working as before, and respect the links and the
+deselected commits.
 
 Run pages update live while a run is in progress and can be cancelled. Finished runs can
 be deleted from the history (one at a time, or every dry run with **Clear dry runs**);
@@ -122,66 +169,85 @@ this never causes a comment to be posted again.
 Profile), at most once every 5 minutes by default. Scheduled runs follow the project's
 "Dry run by default" setting. Changes apply within a minute; no restart is needed.
 
-### Sharing a project
+### Who can do what
 
-Open a project and click **Share**. Enter the exact email of a registered user and pick a
-role:
+Every project belongs to **one owner: a user or an organization**. On each project you
+have one of three roles, and the role alone decides what you can do:
 
-| | Viewer | Editor | Owner |
+| You are… | Your role |
+| --- | --- |
+| The user who owns the project | **Owner** |
+| An admin of the organization that owns it | **Owner** |
+| The administrator of this TicketTrail instance | **Owner** of every project |
+| Someone the project is shared with | **Viewer** or **Editor**, as shared |
+| A member of the organization that owns it | **Viewer** (a share can make you **Editor**) |
+
+| What you can do | Viewer | Editor | Owner |
 |---|:---:|:---:|:---:|
 | See the project, its runs and their commits | ✓ | ✓ | ✓ |
-| Start a dry run | ✓ | ✓ | ✓ |
-| Cancel or delete the dry runs they started | ✓ | ✓ | ✓ |
-| Sync now, cancel and delete any run, clear dry runs | | ✓ | ✓ |
+| Start a dry run; cancel or delete the dry runs you started | ✓ | ✓ | ✓ |
+| Sync now; review a dry run (untick, pick work items) and **Post selected** | | ✓ | ✓ |
+| Cancel and delete any run, clear dry runs | | ✓ | ✓ |
 | Change the settings (branches, pattern, template, start point, schedule) | | ✓ | ✓ |
-| Change the Git or Azure connection | | | ✓ |
-| Share, change roles, delete the project | | | ✓ |
+| Change the Git or Azure connection, share, **Change owner**, delete the project | | | ✓ |
 
-Shared projects appear on the Dashboard under **Shared with me**, and anyone can **Leave**
-a project shared with them. Syncs always use the owner's connections: their tokens are
-never shown to anyone, and the schedule runs in the owner's time zone. Manual runs record
-who started them.
+Connections follow their owner too: your own connections are yours alone; an
+organization's are used by its members and changed by its admins. Saved tokens are never
+shown to anyone, administrators included.
+
+### Sharing a project
+
+Open a project and click **Share**. Enter the exact email of a registered user (or, in an
+organization's project, pick a member) and choose **Viewer** or **Editor**. Shared projects
+appear on the Dashboard under **Shared with me**, and anyone can **Leave** a project shared
+with them. Syncs always use the owner's connections, and the schedule runs in the owner's
+time zone. Manual runs record who started them.
 
 ### Organizations
 
 Anyone can create an organization (**Settings → Organizations → New organization**) and
-becomes its first admin. Admins add members by their exact email.
-
-- **Admins** manage members and the organization's connections, and have the owner role on
-  every project of the organization.
-- **Members** see every project of the organization and can start dry runs (they are
-  viewers). To let a member sync and change a project, share the project with them as
-  **editor**: the Share drawer lists the members by name.
-- A member who creates a project in the organization becomes its editor.
-- The organization's **connections** are used by every member in its projects; their
-  tokens are never shown, and only admins add, change or delete them.
-- **Schedules** of the organization's projects run in the organization's time zone, and
-  keep running whoever leaves.
+becomes its first admin. Admins add members by their exact email, manage the
+organization's connections, and own every project of the organization. Members see every
+project and can start dry runs; share a project with a member as **Editor** to let them sync
+and change it. A member who creates a project in the organization becomes its editor.
+Schedules of the organization's projects run in the organization's time zone and keep
+running whoever leaves.
 
 To create a project for an organization, pick it as **Owner** in the project wizard (or use
-**New project** on the organization's page). To bring an existing project in, open it and
-click **Move to an organization**: its connections come along (a connection you still use
-in another project is copied), and you stay its editor. An admin can give a project back to
-a member with **Move to a member**.
+**New project** on the organization's page). When someone leaves, an admin removes them
+from the organization: they lose access to its projects at once, shares included. The last
+admin can't leave; make someone else an admin first. An organization can be deleted once
+it owns no projects and no connections.
 
-When someone leaves, an admin removes them from the organization: they lose access to its
-projects at once, shares included. The last admin can't leave; make someone else an admin
-first. An organization can be deleted once it owns no projects and no connections.
+### Changing the owner
+
+Open the project and click **Change owner** (owners only). You can give it:
+
+- **to an organization** you belong to: a personal project then belongs to the team, and
+  you stay its editor unless you're an admin there;
+- **to a member** of the project's organization.
+
+Administrators can give any project to any organization or active user. The connections
+come along, still encrypted; a connection the previous owner still uses in another project
+is copied instead. The run history and posted comments come along too, and names the new
+owner already uses get a suffix such as "Billing (from Marco)". Every change is listed
+under **Admin → Projects → Owner changes**.
 
 ### Administrators
 
 The first account is the administrator. **Admin → Users** turns accounts off (which signs
-the user out everywhere and stops their schedules) and on again.
+the user out everywhere and stops their schedules) and on again, and **Transfer all**
+gives everything a user owns personally (projects and connections) to another user, for
+example before turning a leaver's account off.
 
-An administrator sees and may do everything, on every project, connection and organization:
+An administrator is the owner of every project and an admin of every organization:
 
-- **Admin → Projects** lists every project with its owner (a user or an organization).
-  Click one to open it with the owner's rights: sync, change the settings and connections,
-  share, move or delete it. A banner reminds you that it isn't yours.
+- **Admin → Projects** lists every project with its owner; open one to work on it (a
+  banner reminds you it isn't yours) or change its owner.
 - **Admin → Connections** lists every Git and Azure connection with its owner and how many
-  projects use it, to test, change or delete. Saved tokens are never shown, also to
-  administrators: you can replace one, not read it.
-- **Admin → Organizations** lists every organization; open one to manage it as its admin.
+  projects use it, to test, change or delete. Tokens can be replaced, never read.
+- **Admin → Organizations** lists every organization; open one to manage it, or **Make
+  admin** a member of an organization left without one.
 - Your own Dashboard still shows only your projects, your organizations' and those shared
   with you.
 
@@ -191,21 +257,6 @@ member of an organization. **Admin → Activity** lists who did what, on what an
 newest first, and the API logs carry the same line (logger `app.audit`). Reading isn't
 recorded, an administrator's own personal projects and connections aren't either, and an
 action that failed leaves no entry.
-
-Projects can also be given to another user, so nothing is lost when someone leaves:
-
-- **Transfer** gives one project to another user, with the connections it uses. A
-  connection the previous owner still uses in another project is copied instead.
-- **Admin → Users → Transfer all** gives everything a user owns (projects and connections)
-  to another user, for example before turning a leaver's account off.
-
-Tokens move still encrypted, the run history and posted comments come along, and names
-the new owner already uses get a suffix such as "Billing (from Marco)". Every transfer is
-listed under **Transfer history**.
-
-Organizations' projects are not transferred this way: an admin of the organization (an
-administrator counts as one) moves them with **Move to a member**. **Make admin** on
-**Admin → Organizations** promotes a member of an organization that has no admin left.
 
 ## 3. Access tokens: minimum scopes per host
 

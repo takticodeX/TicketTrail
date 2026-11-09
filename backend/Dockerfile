@@ -1,5 +1,6 @@
 # One image for the api, worker and scheduler services.
 FROM docker.io/library/python:3.12-slim
+LABEL org.opencontainers.image.source="https://github.com/takticodeX/TicketTrail"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

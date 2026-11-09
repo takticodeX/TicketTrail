@@ -11,10 +11,13 @@ x-hardened: &hardened
   security_opt:
     - no-new-privileges:true
 
+# Images: built here by default. To run a published release instead of building, set
+# TT_IMAGE_PREFIX=ghcr.io/takticodex/tickettrail and TT_VERSION=<version> in .env
+# (see README "Install from a release").
 x-backend: &backend
   <<: *hardened
   build: ./backend
-  image: localhost/tickettrail-backend:latest
+  image: ${TT_IMAGE_PREFIX:-localhost/tickettrail}-backend:${TT_VERSION:-latest}
   env_file: .env
   environment:
     # Built from TT_DB_PASSWORD unless TT_DATABASE_URL is set explicitly in .env.
@@ -30,7 +33,7 @@ services:
   frontend:
     <<: *hardened
     build: ./frontend
-    image: localhost/tickettrail-frontend:latest
+    image: ${TT_IMAGE_PREFIX:-localhost/tickettrail}-frontend:${TT_VERSION:-latest}
     restart: unless-stopped
     ports:
       - "${TT_HTTP_PORT:-8080}:8080"
