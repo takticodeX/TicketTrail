@@ -88,13 +88,19 @@ export interface GitTestResult {
   error: string | null;
 }
 
-export interface AzureConnection {
+/** The kind of board a connection talks to. */
+export type BoardKind = 'azure';
+
+export interface BoardConnection {
   id: string;
   name: string;
   /** Set when an organization owns the connection. */
   organization_id: string | null;
-  organization_url: string;
-  azure_project: string;
+  kind: BoardKind;
+  /** Azure: the organization URL. */
+  url: string;
+  /** Azure: the project name. */
+  scope: string;
   has_secret: boolean;
   last_test_at: string | null;
   last_test_ok: boolean | null;
@@ -102,19 +108,22 @@ export interface AzureConnection {
   updated_at: string;
 }
 
-export interface AzureConnectionInput {
+export interface BoardConnectionInput {
   name: string;
-  organization_url: string;
-  azure_project: string;
-  /** Write-only. Omit or send "" to keep the saved PAT. */
-  pat?: string;
+  /** On create only; the kind of a saved connection is fixed. */
+  kind?: BoardKind;
+  url: string;
+  scope: string;
+  /** Write-only (PAT). Omit or send "" to keep the saved one. */
+  secret?: string;
   /** On create only: the organization that owns it (its admins only). */
   organization_id?: string;
 }
 
-export interface AzureTestResult {
+export interface BoardTestResult {
   ok: boolean;
-  project_name: string | null;
+  /** The Azure project's name. */
+  scope_name: string | null;
   error: string | null;
 }
 
@@ -122,7 +131,7 @@ export interface Project {
   id: string;
   name: string;
   git_connection_id: string;
-  azure_connection_id: string;
+  board_connection_id: string;
   branches: string[];
   ticket_pattern: string;
   comment_template: string;
@@ -152,7 +161,7 @@ export interface Project {
   admin_access: boolean;
   /** The connections without their secrets, so shared users can show them too. */
   git_connection: ProjectGitSummary | null;
-  azure_connection: ProjectAzureSummary | null;
+  board_connection: ProjectBoardSummary | null;
 }
 
 export type ProjectRole = 'owner' | 'editor' | 'viewer';
@@ -165,7 +174,7 @@ export interface UserSummary {
 }
 
 export type ProjectGitSummary = Pick<GitConnection, 'id' | 'name' | 'repo_url' | 'host' | 'commit_url_pattern'>;
-export type ProjectAzureSummary = Pick<AzureConnection, 'id' | 'name' | 'organization_url' | 'azure_project'>;
+export type ProjectBoardSummary = Pick<BoardConnection, 'id' | 'name' | 'kind' | 'url' | 'scope'>;
 
 export type ProjectInput = Omit<
   Project,
@@ -182,7 +191,7 @@ export type ProjectInput = Omit<
   | 'shares'
   | 'admin_access'
   | 'git_connection'
-  | 'azure_connection'
+  | 'board_connection'
 > & {
   /** On create only: the organization that owns it (any member). */
   organization_id?: string;
@@ -218,7 +227,7 @@ export interface ProjectShare {
 
 export interface PatternTestResponse {
   pattern: string;
-  results: { ids: number[]; error: string | null }[];
+  results: { ids: string[]; error: string | null }[];
 }
 
 export type RunStatus =
@@ -271,7 +280,8 @@ export interface SyncRunItem {
   commit_sha: string;
   commit_subject: string;
   branch: string;
-  work_item_id: number | null;
+  /** A string: some boards' IDs don't fit a JavaScript number. */
+  work_item_id: string | null;
   action: ItemAction;
   detail: string | null;
   /** The work item was linked by hand in a review. */
@@ -280,7 +290,7 @@ export interface SyncRunItem {
 
 /** A work item of the board, offered by the review's picker. */
 export interface WorkItemOption {
-  id: number;
+  id: string;
   title: string;
   /** Bug, Task, User Story, ... */
   type: string;

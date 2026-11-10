@@ -1,4 +1,4 @@
-"""At most N concurrent requests per Azure organization, across all workers (spec section 6)."""
+"""At most N concurrent requests per board server, across all workers (spec section 6)."""
 
 import time
 import uuid
@@ -57,7 +57,7 @@ class RedisSlotLimiter:
     def for_organization(
         cls, redis: Redis, organization_url: str, limit: int
     ) -> "RedisSlotLimiter":
-        return cls(redis, f"tt:azure:slots:{organization_url.lower().rstrip('/')}", limit)
+        return cls(redis, f"tt:board:slots:{organization_url.lower().rstrip('/')}", limit)
 
     @contextmanager
     def slot(self) -> Iterator[None]:

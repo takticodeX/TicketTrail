@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.base import OwnedModel
-from app.db.models import AzureConnection, GitConnection, Project
+from app.db.models import BoardConnection, GitConnection, Project
 
 
 class OwnedRepository[M: OwnedModel]:
@@ -83,8 +83,8 @@ class GitConnectionRepository(OwnedRepository[GitConnection]):
     model = GitConnection
 
 
-class AzureConnectionRepository(OwnedRepository[AzureConnection]):
-    model = AzureConnection
+class BoardConnectionRepository(OwnedRepository[BoardConnection]):
+    model = BoardConnection
 
 
 class ProjectRepository(OwnedRepository[Project]):
@@ -94,11 +94,11 @@ class ProjectRepository(OwnedRepository[Project]):
         self,
         *,
         git_connection_id: uuid.UUID | None = None,
-        azure_connection_id: uuid.UUID | None = None,
+        board_connection_id: uuid.UUID | None = None,
     ) -> list[str]:
         query = select(Project.name).where(self._owner_filter())
         if git_connection_id is not None:
             query = query.where(Project.git_connection_id == git_connection_id)
-        if azure_connection_id is not None:
-            query = query.where(Project.azure_connection_id == azure_connection_id)
+        if board_connection_id is not None:
+            query = query.where(Project.board_connection_id == board_connection_id)
         return list(self.session.scalars(query.order_by(Project.name)))

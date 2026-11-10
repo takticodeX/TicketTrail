@@ -4,18 +4,19 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import {
-  listAllAzureConnections,
+  listAllBoardConnections,
   listAllGitConnections,
-  type AdminAzureConnection,
+  type AdminBoardConnection,
   type AdminGitConnection,
   type ConnectionOwner,
 } from '../../api/admin';
 import { deleteErrorMessage, errorMessage } from '../../api/errors';
 import { confirmDelete } from '../../components/confirmDelete';
-import { AzureConnectionForm } from '../../components/settings/AzureConnectionForm';
+import { BoardConnectionForm } from '../../components/settings/BoardConnectionForm';
 import { GitConnectionForm } from '../../components/settings/GitConnectionForm';
 import { TestStatus } from '../../components/TestStatus';
-import { useDeleteAzureConnection, useDeleteGitConnection } from '../../hooks/useSettings';
+import { useDeleteBoardConnection, useDeleteGitConnection } from '../../hooks/useSettings';
+import { BOARD_LABELS, boardDetail } from '../../lib/boards';
 
 const KEY = ['admin-connections'] as const;
 
@@ -40,15 +41,15 @@ function Owner({ connection }: { connection: ConnectionOwner }) {
   );
 }
 
-/** Admins only: every Git and Azure connection, editable. Tokens stay write-only. */
+/** Admins only: every Git and board connection, editable. Tokens stay write-only. */
 export function AdminConnectionsPage() {
   const queryClient = useQueryClient();
   const git = useQuery({ queryKey: [...KEY, 'git'], queryFn: () => listAllGitConnections(1) });
-  const azure = useQuery({ queryKey: [...KEY, 'azure'], queryFn: () => listAllAzureConnections(1) });
+  const boards = useQuery({ queryKey: [...KEY, 'boards'], queryFn: () => listAllBoardConnections(1) });
   const removeGit = useDeleteGitConnection();
-  const removeAzure = useDeleteAzureConnection();
+  const removeBoard = useDeleteBoardConnection();
   const [gitEditing, setGitEditing] = useState<AdminGitConnection | null>(null);
-  const [azureEditing, setAzureEditing] = useState<AdminAzureConnection | null>(null);
+  const [boardEditing, setBoardEditing] = useState<AdminBoardConnection | null>(null);
   const [formKey, setFormKey] = useState(0);
   const refresh = () => void queryClient.invalidateQueries({ queryKey: KEY });
 
@@ -73,29 +74,29 @@ export function AdminConnectionsPage() {
       },
       remove: () => removeGit.mutateAsync(c.id),
     })),
-    ...(azure.data?.items ?? []).map((c) => ({
+    ...(boards.data?.items ?? []).map((c) => ({
       connection: c,
-      kind: 'Azure',
-      detail: `${c.organization_url} · ${c.azure_project}`,
+      kind: BOARD_LABELS[c.kind],
+      detail: boardDetail(c),
       edit: () => {
-        setAzureEditing(c);
+        setBoardEditing(c);
         setFormKey((key) => key + 1);
       },
-      remove: () => removeAzure.mutateAsync(c.id),
+      remove: () => removeBoard.mutateAsync(c.id),
     })),
   ];
-  const error = git.error ?? azure.error;
+  const error = git.error ?? boards.error;
 
   return (
     <Stack maw={1100}>
       <div>
         <Title order={2}>Connections</Title>
         <Text c="dimmed" size="sm">
-          Every Git and Azure connection on this instance. You can test, change and delete any of them; saved tokens
+          Every Git and board connection on this instance. You can test, change and delete any of them; saved tokens
           are never shown, also to administrators, but you can replace them. Changes are recorded.
         </Text>
       </div>
-      {(git.isPending || azure.isPending) && (
+      {(git.isPending || boards.isPending) && (
         <Center p="xl">
           <Loader aria-label="Loading" />
         </Center>
@@ -105,7 +106,7 @@ export function AdminConnectionsPage() {
           {errorMessage(error)}
         </Alert>
       )}
-      {git.data && azure.data && rows.length === 0 && (
+      {git.data && boards.data && rows.length === 0 && (
         <Text size="sm" c="dimmed">
           No connections yet.
         </Text>
@@ -191,18 +192,18 @@ export function AdminConnectionsPage() {
         )}
       </Drawer>
       <Drawer
-        opened={azureEditing !== null}
-        onClose={() => setAzureEditing(null)}
+        opened={boardEditing !== null}
+        onClose={() => setBoardEditing(null)}
         position="right"
         size="lg"
-        title="Edit Azure connection"
+        title="Edit board connection"
       >
-        {azureEditing && (
-          <AzureConnectionForm
+        {boardEditing && (
+          <BoardConnectionForm
             key={formKey}
-            connection={azureEditing}
+            connection={boardEditing}
             onSaved={refresh}
-            onClose={() => setAzureEditing(null)}
+            onClose={() => setBoardEditing(null)}
           />
         )}
       </Drawer>

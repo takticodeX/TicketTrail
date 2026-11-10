@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AzureConnection, GitConnection, Project, SyncRun, SyncRunDetail, SyncRunItem } from '../api/types';
+import type { BoardConnection, GitConnection, Project, SyncRun, SyncRunDetail, SyncRunItem } from '../api/types';
 import { useAuth } from '../hooks/useAuth';
 import { OWN_PROJECT, authValue, errorResponse, jsonResponse, mockFetch, renderWithProviders } from '../test/utils';
 import { ProjectDetailPage } from './ProjectDetailPage';
@@ -22,19 +22,19 @@ const git = {
 const azure = {
   id: 'a1',
   name: 'Board',
-  organization_url: 'https://dev.azure.com/acme',
-  azure_project: 'Web App',
-} as AzureConnection;
+  kind: 'azure', url: 'https://dev.azure.com/acme',
+  scope: 'Web App',
+} as BoardConnection;
 
 const project = {
   id: 'p1',
   name: 'Web app',
   git_connection_id: 'g1',
-  azure_connection_id: 'a1',
+  board_connection_id: 'a1',
   branches: [],
   ...OWN_PROJECT,
   git_connection: git,
-  azure_connection: azure,
+  board_connection: azure,
 } as unknown as Project;
 
 const run: SyncRunDetail = {
@@ -60,7 +60,7 @@ const item = (overrides: Partial<SyncRunItem>): SyncRunItem => ({
   commit_sha: 'abcdef1234567890abcdef1234567890abcdef12',
   commit_subject: 'Fix login AB#12',
   branch: 'main',
-  work_item_id: 12,
+  work_item_id: '12',
   action: 'would_post',
   detail: null,
   ...overrides,
@@ -72,7 +72,7 @@ function baseRoutes(extra: Record<string, Parameters<typeof mockFetch>[0][string
   return mockFetch({
     'GET /api/v1/projects/p1': () => jsonResponse(project),
     'GET /api/v1/git-connections?page_size=100': () => page([git]),
-    'GET /api/v1/azure-connections?page_size=100': () => page([azure]),
+    'GET /api/v1/board-connections?page_size=100': () => page([azure]),
     ...extra,
   });
 }

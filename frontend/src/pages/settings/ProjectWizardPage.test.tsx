@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AzureConnection, GitConnection, Project } from '../../api/types';
+import type { BoardConnection, GitConnection, Project } from '../../api/types';
 import { useAuth } from '../../hooks/useAuth';
 import { OWN_PROJECT, authValue, jsonResponse, mockFetch, renderWithProviders } from '../../test/utils';
 import { ProjectWizardPage } from './ProjectWizardPage';
@@ -16,7 +16,7 @@ const git = {
   repo_url: 'https://github.com/acme/app.git',
   commit_url_pattern: 'https://github.com/acme/app/commit/{sha}',
 } as GitConnection;
-const azure = { id: 'a1', name: 'Board', azure_project: 'proj' } as AzureConnection;
+const azure = { id: 'a1', name: 'Board', scope: 'proj' } as BoardConnection;
 const page = <T,>(items: T[]) => jsonResponse({ items, total: items.length, page: 1, page_size: 100 });
 
 beforeEach(() => vi.mocked(useAuth).mockReturnValue(authValue()));
@@ -42,7 +42,7 @@ describe('ProjectWizardPage', () => {
   it('walks through the steps and creates a project', async () => {
     const fetchMock = mockFetch({
       'GET /api/v1/git-connections?page_size=100': () => page([git]),
-      'GET /api/v1/azure-connections?page_size=100': () => page([azure]),
+      'GET /api/v1/board-connections?page_size=100': () => page([azure]),
       'POST /api/v1/git-connections/g1/test': () =>
         jsonResponse({ ok: true, branches: ['develop', 'main'], default_branch: 'main', error: null }),
       'POST /api/v1/projects/test-pattern': () =>
@@ -63,7 +63,7 @@ describe('ProjectWizardPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
 
     // Board
-    await pick('Azure connection', 'Board (proj)');
+    await pick('Board connection', 'Board (proj)');
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
 
     // Ticket pattern, with the live tester
@@ -88,7 +88,7 @@ describe('ProjectWizardPage', () => {
     expect(JSON.parse(String(create?.[1]?.body))).toMatchObject({
       name: 'Web app',
       git_connection_id: 'g1',
-      azure_connection_id: 'a1',
+      board_connection_id: 'a1',
       branches: [],
       ticket_pattern: 'AB#(\\d+)',
       start_from: '2026-01-31',
@@ -100,7 +100,7 @@ describe('ProjectWizardPage', () => {
   it('does not advance past a step with errors', async () => {
     mockFetch({
       'GET /api/v1/git-connections?page_size=100': () => page([git]),
-      'GET /api/v1/azure-connections?page_size=100': () => page([azure]),
+      'GET /api/v1/board-connections?page_size=100': () => page([azure]),
     });
     renderWizard();
     await userEvent.click(screen.getByRole('button', { name: 'Next' }));
@@ -113,7 +113,7 @@ describe('ProjectWizardPage', () => {
       id: 'p1',
       name: 'Web app',
       git_connection_id: 'g1',
-      azure_connection_id: 'a1',
+      board_connection_id: 'a1',
       branches: ['main'],
       ticket_pattern: 'AB#(\\d+)',
       comment_template: '{subject} tt:{sha}',
@@ -129,7 +129,7 @@ describe('ProjectWizardPage', () => {
     mockFetch({
       'GET /api/v1/projects/p1': () => jsonResponse(project),
       'GET /api/v1/git-connections?page_size=100': () => page([git]),
-      'GET /api/v1/azure-connections?page_size=100': () => page([azure]),
+      'GET /api/v1/board-connections?page_size=100': () => page([azure]),
       'PATCH /api/v1/projects/p1': () =>
         jsonResponse(
           {

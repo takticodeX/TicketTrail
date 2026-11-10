@@ -10,7 +10,7 @@ export function toFormValues(project: Project | undefined): ProjectValues {
   return {
     name: project?.name ?? '',
     git_connection_id: project?.git_connection_id ?? '',
-    azure_connection_id: project?.azure_connection_id ?? '',
+    board_connection_id: project?.board_connection_id ?? '',
     branches: project?.branches ?? [],
     ticket_pattern: project?.ticket_pattern ?? DEFAULT_TICKET_PATTERN,
     comment_template: project?.comment_template ?? DEFAULT_COMMENT_TEMPLATE,
@@ -34,7 +34,7 @@ export function toProjectInput(values: ProjectValues): ProjectInput {
   return {
     name: values.name,
     git_connection_id: values.git_connection_id,
-    azure_connection_id: values.azure_connection_id,
+    board_connection_id: values.board_connection_id,
     branches: values.branches,
     ticket_pattern: values.ticket_pattern,
     comment_template: values.comment_template,
@@ -78,7 +78,7 @@ export const FIELD_STEP: Record<string, number> = {
   name: 0,
   git_connection_id: 0,
   branches: 1,
-  azure_connection_id: 2,
+  board_connection_id: 2,
   ticket_pattern: 3,
   comment_template: 4,
   start_from: 5,

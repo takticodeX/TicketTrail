@@ -64,7 +64,7 @@ export function useChangeOwner(projectId: string) {
     mutationFn: (target: { organization_id: string } | { to_user_id: string }) =>
       api.changeOwner(projectId, target),
     onSuccess: () => {
-      const keys = [settingsKeys.projects, settingsKeys.git, settingsKeys.azure, organizationKeys.all];
+      const keys = [settingsKeys.projects, settingsKeys.git, settingsKeys.boards, organizationKeys.all];
       for (const key of [...keys, ['admin-projects'], ['admin-transfers']]) {
         void queryClient.invalidateQueries({ queryKey: key });
       }

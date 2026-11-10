@@ -97,10 +97,11 @@ def _clean_tables(request: pytest.FixtureRequest) -> Iterator[None]:
 def no_dns(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat every host as public, so tests don't depend on real DNS (or have file:// hosts)."""
     from app.sync import engine
-    from app.worker import connection_checks
+    from app.worker import boards, connection_checks
 
     monkeypatch.setattr(connection_checks, "check_public_host", lambda *_, **__: None)
     monkeypatch.setattr(engine, "check_public_host", lambda *_, **__: None)
+    monkeypatch.setattr(boards, "check_public_host", lambda *_, **__: None)
 
 
 @pytest.fixture

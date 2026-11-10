@@ -13,7 +13,7 @@ const TYPE_LABELS: Record<AuditEvent['resource_type'], string> = {
   project: 'Project',
   run: 'Run',
   git_connection: 'Git connection',
-  azure_connection: 'Azure connection',
+  board_connection: 'Board connection',
   organization: 'Organization',
 };
 

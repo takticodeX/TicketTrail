@@ -154,7 +154,7 @@ def test_admin_manages_someone_elses_connections_without_seeing_secrets(
 ) -> None:
     caplog.set_level(logging.INFO, logger="app.audit")
     git = create(client, "git-connections", bob.headers, git_payload())
-    azure = create(client, "azure-connections", bob.headers, azure_payload())
+    azure = create(client, "board-connections", bob.headers, azure_payload())
     url = f"{API}/git-connections/{git['id']}"
     read = client.get(url, headers=admin.headers)
     assert read.status_code == 200
@@ -164,7 +164,7 @@ def test_admin_manages_someone_elses_connections_without_seeing_secrets(
     listed = client.get(f"{API}/git-connections?owner_id={bob.id}", headers=admin.headers)
     assert [c["name"] for c in listed.json()["items"]] == ["App repo"]
     assert client.patch(url, headers=admin.headers, json={"name": "Renamed"}).status_code == 200
-    tested = client.post(f"{API}/azure-connections/{azure['id']}/test", headers=admin.headers)
+    tested = client.post(f"{API}/board-connections/{azure['id']}/test", headers=admin.headers)
     assert tested.json()["ok"] is True
     assert client.delete(url, headers=admin.headers).status_code == 204
     assert [
@@ -190,7 +190,7 @@ def test_admin_lists_every_connection_with_its_owner(
     org = create(client, "organizations", bob.headers, {"name": "Acme"})
     create(
         client,
-        "azure-connections",
+        "board-connections",
         bob.headers,
         azure_payload(name="Acme board", organization_id=org["id"]),
     )
@@ -198,7 +198,7 @@ def test_admin_lists_every_connection_with_its_owner(
     assert [(c["name"], c["owner"]["email"], c["projects"]) for c in gits["items"]] == [
         ("App repo", "bob@example.com", 1)
     ]
-    azures = client.get(f"{API}/admin/azure-connections", headers=admin.headers).json()
+    azures = client.get(f"{API}/admin/board-connections", headers=admin.headers).json()
     assert [
         (
             c["name"],
@@ -329,7 +329,7 @@ def test_actions_in_an_organization_the_admin_belongs_to_are_recorded(
     )
     azure = create(
         client,
-        "azure-connections",
+        "board-connections",
         admin.headers,
         azure_payload(name="Acme board", organization_id=org["id"]),
     )
@@ -341,7 +341,7 @@ def test_actions_in_an_organization_the_admin_belongs_to_are_recorded(
             "name": "Shop",
             "organization_id": org["id"],
             "git_connection_id": git["id"],
-            "azure_connection_id": azure["id"],
+            "board_connection_id": azure["id"],
         },
     )
     client.patch(f"{API}/projects/{project['id']}", headers=admin.headers, json={"name": "Shop 2"})

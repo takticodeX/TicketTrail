@@ -4,6 +4,16 @@ Each released version has a tag (`vX.Y.Z`), images on `ghcr.io/takticodex/ticket
 and a GitHub Release with an offline archive of the images. See README "Install from a
 release".
 
+## [Unreleased]
+
+### Changed
+- **Azure connections are now board connections** (Settings → Board connections,
+  `/settings/boards`; the old address redirects), ready for boards other than Azure DevOps.
+  Existing connections, projects and posted comments are migrated as they are. The API
+  moved to `/board-connections` with the fields `kind`, `url`, `scope` and `secret`, and
+  work item IDs are now strings.
+- `TT_AZURE_MAX_CONCURRENCY` is now `TT_BOARD_MAX_CONCURRENCY`; the old name still works.
+
 ## [0.3.0] - 2026-11-09
 
 ### Added

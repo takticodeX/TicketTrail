@@ -28,19 +28,19 @@ class WorkerContext:
     repos_dir: Path = REPOS_DIR
     # Tests use file:// fixture repositories; production only speaks HTTPS.
     git_protocols: str = DEFAULT_ALLOWED_PROTOCOLS
-    # Shared by all workers to cap concurrent Azure requests per organization.
+    # Shared by all workers to cap concurrent board requests per server.
     redis: Redis | None = None
-    # Waits between Azure retries; tests make it instant.
+    # Waits between board retries; tests make it instant.
     sleep: Callable[[float], None] = time.sleep
 
     def project_lock(self) -> ProjectLock:
         return NoLock() if self.redis is None else RedisProjectLock(self.redis)
 
-    def azure_limiter(self, organization_url: str) -> ConcurrencyLimiter:
+    def board_limiter(self, url: str) -> ConcurrencyLimiter:
         if self.redis is None:
             return NoLimit()
         return RedisSlotLimiter.for_organization(
-            self.redis, organization_url, self.settings.azure_max_concurrency
+            self.redis, url, self.settings.board_max_concurrency
         )
 
 

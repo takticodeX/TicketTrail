@@ -1,6 +1,6 @@
 import { Alert, Badge, Group, Text } from '@mantine/core';
 
-import type { AzureTestResult, GitTestResult } from '../../api/types';
+import type { BoardTestResult, GitTestResult } from '../../api/types';
 
 const MAX_BRANCH_BADGES = 30;
 
@@ -40,7 +40,7 @@ export function GitTestResultView({ result }: { result: GitTestResult }) {
   );
 }
 
-export function AzureTestResultView({ result }: { result: AzureTestResult }) {
+export function BoardTestResultView({ result }: { result: BoardTestResult }) {
   if (!result.ok) {
     return (
       <Alert color="red" variant="light" title="Connection failed" role="alert">
@@ -50,7 +50,7 @@ export function AzureTestResultView({ result }: { result: AzureTestResult }) {
   }
   return (
     <Alert color="teal" variant="light" title="Connection works" role="status">
-      Found the project <strong>{result.project_name}</strong>.
+      Found <strong>{result.scope_name}</strong>.
     </Alert>
   );
 }

@@ -57,7 +57,7 @@ Requests flow left to right. The API only stores settings and queues work; the w
 | `worker` | Same image as `api`, runs Celery | Runs sync jobs: Git fetch, parsing, posting to Azure |
 | `scheduler` | Same image, runs Celery Beat | Ticks once a minute; the tick starts every scheduled sync that came due (section 7) |
 | `db` | PostgreSQL 16 | All persistent data |
-| `redis` | Redis 7 | Celery broker and result backend, per-project sync locks, the Azure concurrency limit and login rate limits |
+| `redis` | Redis 7 | Celery broker and result backend, per-project sync locks, the board concurrency limit and login rate limits |
 
 **Libraries**
 
@@ -74,7 +74,7 @@ Repository volumes: each project's repo is kept as a bare, blobless clone of its
 
 ## 4. Data model
 
-Connections and projects belong to a user (`owner_id`) or to an organization (`organization_id`): exactly one of the two is set, enforced by a check constraint, and names are unique per owner. Connections are reusable: one Azure connection can serve several projects. All tables use UUID primary keys and `created_at` / `updated_at` timestamps.
+Connections and projects belong to a user (`owner_id`) or to an organization (`organization_id`): exactly one of the two is set, enforced by a check constraint, and names are unique per owner. Connections are reusable: one board connection can serve several projects. All tables use UUID primary keys and `created_at` / `updated_at` timestamps.
 
 | Table | Key columns | Notes |
 | --- | --- | --- |
@@ -82,18 +82,20 @@ Connections and projects belong to a user (`owner_id`) or to an organization (`o
 | `organizations` | `name` (unique), `timezone` (IANA), `created_by_id` | A team that owns projects and connections. Deleted only when it owns nothing |
 | `organization_members` | `organization_id`, `user_id`, `role` (`admin` \| `member`) | **Unique (`organization_id`, `user_id`)**. Deleted with the organization or the user |
 | `git_connections` | `owner_id` or `organization_id`, `name`, `repo_url`, `auth_type` (`token` \| `basic` \| `none`), `username`, `secret_enc`, commit\_url\_template (nullable), `last_test_at`, `last_test_ok` | `secret_enc` = Fernet-encrypted token or password |
-| `azure_connections` | `owner_id` or `organization_id`, `name`, `organization_url` (e.g. `https://dev.azure.com/acme`), `azure_project`, `pat_enc`, `last_test_at`, `last_test_ok` | PAT needs the *Work Items (Read & Write)* scope |
-| `projects` | `owner_id` or `organization_id`, `name` (unique per owner), `git_connection_id`, `azure_connection_id`, `branches` (text\[\]; empty = default branch only), `ticket_pattern` (default `AB#(\d+)`), `comment_template`, `start_from` (date or SHA), `include_merge_commits` (bool, default false), `schedule_cron` (nullable), `schedule_enabled`, `schedule_last_fired_at`, `dry_run_default` | One repo → one board. `schedule_last_fired_at` makes each schedule slot fire once (section 7) |
+| `board_connections` | `owner_id` or `organization_id`, `name`, `kind` (`azure` \| `planka`), `url` (Azure: the organization URL, e.g. `https://dev.azure.com/acme`), `scope` (Azure: the project name), `secret_enc` (Azure: the PAT), `last_test_at`, `last_test_ok` | The board a project posts to. An Azure PAT needs the *Work Items (Read & Write)* scope. Called `azure_connections` before M10 |
+| `projects` | `owner_id` or `organization_id`, `name` (unique per owner), `git_connection_id`, `board_connection_id`, `branches` (text\[\]; empty = default branch only), `ticket_pattern` (default `AB#(\d+)`), `comment_template`, `start_from` (date or SHA), `include_merge_commits` (bool, default false), `schedule_cron` (nullable), `schedule_enabled`, `schedule_last_fired_at`, `dry_run_default` | One repo → one board. `schedule_last_fired_at` makes each schedule slot fire once (section 7) |
 | `project_shares` | `project_id`, `user_id`, `role` (`viewer` \| `editor`) | **Unique (`project_id`, `user_id`)**. Deleted with the project or the user |
 | `sync_runs` | `project_id`, `trigger` (`manual` \| `scheduled`), `dry_run`, `status` (`queued` \| `running` \| `success` \| `partial` \| `failed` \| `skipped` \| `cancelled`), `started_at`, `finished_at`, `commits_scanned`, `comments_posted`, `skipped`, `errors`, `error_message`, `cancel_requested`, `triggered_by_id` (nullable) | One row per sync run. `triggered_by_id` is the user who started a manual run; null for scheduled runs |
-| `sync_run_items` | `sync_run_id`, `position`, `commit_sha`, `commit_subject`, `branch`, `work_item_id`, `action` (`posted` \| `would_post` \| `skipped_duplicate` \| `skipped_not_found` \| `no_reference` \| `error` \| `excluded`), `detail`, `manual` | The audit trail shown in the UI. `position` orders the items (oldest commit first); `manual` marks a work item linked by hand; `excluded` a pair deselected in a review |
+| `sync_run_items` | `sync_run_id`, `position`, `commit_sha`, `commit_subject`, `branch`, `work_item_id` (text, nullable), `action` (`posted` \| `would_post` \| `skipped_duplicate` \| `skipped_not_found` \| `no_reference` \| `error` \| `excluded`), `detail`, `manual` | The audit trail shown in the UI. `position` orders the items (oldest commit first); `manual` marks a work item linked by hand; `excluded` a pair deselected in a review |
 | `commit_links` | `project_id`, `commit_sha`, `work_item_id`, `created_by_id` | **Unique (`project_id`, `commit_sha`, `work_item_id`)**. A work item linked to a commit by hand in a review: every run treats it as if the message referenced it |
 | `commit_exclusions` | `project_id`, `commit_sha`, `work_item_id`, `created_by_id` | **Unique (`project_id`, `commit_sha`, `work_item_id`)**. A pair deselected in a review: no run ever posts it (recorded as `excluded`) |
-| `posted_comments` | `project_id`, `commit_sha`, `work_item_id`, `azure_comment_id`, status (pending \| posted), `posted_at` | **Unique (`project_id`, `commit_sha`, `work_item_id`)**: this is what guarantees a commit is never posted twice |
+| `posted_comments` | `project_id`, `commit_sha`, `work_item_id`, `comment_id`, status (pending \| posted), `posted_at` | **Unique (`project_id`, `commit_sha`, `work_item_id`)**: this is what guarantees a commit is never posted twice |
 | `project_cursors` | `project_id`, `branch`, `last_sha` | Where the last successful sync stopped on each branch |
 | `refresh_tokens` | `user_id`, `token_hash`, `expires_at`, `revoked`, `revoked_at` | Lets sessions be revoked. `revoked_at` gives a rotated token a short grace period (section 10) |
-| `audit_events` | `actor_id` (nullable), `actor_email`, `action` (e.g. `update`, `delete`, `sync`, `share`), `resource_type` (`project` \| `run` \| `git_connection` \| `azure_connection` \| `organization`), `resource_id`, `resource_name`, `owner_label` | What administrators did to anything not personally theirs. Names and owners are copied, so entries stay readable after the resource is gone |
+| `audit_events` | `actor_id` (nullable), `actor_email`, `action` (e.g. `update`, `delete`, `sync`, `share`), `resource_type` (`project` \| `run` \| `git_connection` \| `board_connection` \| `organization`), `resource_id`, `resource_name`, `owner_label` | What administrators did to anything not personally theirs. Names and owners are copied, so entries stay readable after the resource is gone |
 | `ownership_transfers` | `actor_id`, `from_user_id` or `from_organization_id`, `to_user_id` or `to_organization_id`, `project_id` (null when everything a user owned was moved), `projects_moved`, `connections_moved`, `connections_copied`, `summary` | History of owner changes (**Change owner** and **Transfer all**) |
+
+Work item and comment IDs are stored as text (up to 64 characters): Azure's are small numbers, but other boards' are not, and the API returns them as strings so JavaScript never rounds them.
 
 `posted_comments` is the source of truth for de-duplication. `project_cursors` is only an optimization so the app doesn't rescan the whole history. If the cursors are deleted, a full rescan still posts nothing twice. Deleting runs from the history never affects `posted_comments`.
 
@@ -112,7 +114,7 @@ Personal connections are private to their owner; an organization's connections a
 | Cancel or delete a dry run they started themselves | ✓ | ✓ | ✓ |
 | Start a real sync; review a dry run (deselect, link work items) and post the selection; cancel or delete any run; clear the history | | ✓ | ✓ |
 | Change the settings: name, branches, pattern, template, start point, merge commits, schedule, dry-run default | | ✓ | ✓ |
-| Change the Git or Azure connection | | | ✓ |
+| Change the Git or board connection | | | ✓ |
 | Share the project, change or remove shares, change the owner, delete the project | | | ✓ |
 
 - A user with no access gets **404**, as if the project didn't exist. A user with access but too weak a role gets **403** with the code `insufficient_role`.
@@ -175,7 +177,7 @@ Examples: `AB#(\d+)` (default), `#(\d+)`, `(?:fixes|refs)\s+#(\d+)`, `PROJ-(\d+)
 
 ## 6. Azure DevOps integration
 
-TicketTrail calls the Azure DevOps REST API with a PAT, using the header `Authorization: Basic base64(":" + PAT)`. The PAT needs **Work Items (Read & Write)** (`vso.work_write`). All calls go through one `AzureBoardsClient` class, which sits behind a `WorkItemTracker` interface so other trackers can be added later.
+TicketTrail calls the Azure DevOps REST API with a PAT, using the header `Authorization: Basic base64(":" + PAT)`. The PAT needs **Work Items (Read & Write)** (`vso.work_write`). All calls go through one `AzureBoardsClient` class, which sits behind a `WorkItemTracker` interface; the worker opens the client of a board connection in one place (`app/worker/boards.py`), which also applies the SSRF guard and decrypts the secret.
 
 | Purpose | Call |
 | --- | --- |
@@ -215,7 +217,7 @@ The template is Markdown and can be edited per project. Default:
 - **404 on the existence check itself** (wrong organization or project): fail the run without moving any cursor. Treating it as "every work item is missing" would skip those commits for good.
 - **429 or 503:** honor `Retry-After`. Otherwise use exponential backoff with jitter (1 s, 2 s, 4 s … up to 60 s, at most 5 attempts).
 - Also honor Azure's `X-RateLimit-Delay` / `Retry-After` throttling headers.
-- Make at most 5 concurrent requests per Azure organization, across all workers.
+- Make at most 5 concurrent requests per Azure organization, across all workers (`TT_BOARD_MAX_CONCURRENCY`).
 
 ## 7. Sync engine
 
@@ -243,7 +245,7 @@ A sync run is one Celery task, `sync_project(project_id, trigger, dry_run, run_i
 7. For each pair (commit, work item), oldest commit first:
    1. Insert a `posted_comments` row with status `pending`. The unique constraint stops a parallel duplicate here.
    2. Post the comment to Azure.
-   3. Update the row to `posted`, store the `azure_comment_id`, and record the item as `posted`.
+   3. Update the row to `posted`, store the `comment_id`, and record the item as `posted`.
 8. Move each branch cursor forward only past commits whose pairs all succeeded or were skipped for good. If anything failed with an error that may go away, leave the cursor where it is so the next run retries it.
 9. Finish the run with status `success`, `partial` (some errors or warnings, such as a missing branch or rewritten history) or `failed`, and store the counters. Release the lock.
 
@@ -276,9 +278,9 @@ The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoin
 | GET / POST | `/git-connections` | List / create: the caller's own, an organization's with `?organization_id=` (members list) / `organization_id` in the body (admins create), or another user's with `?owner_id=` (administrators) |
 | GET / PATCH / DELETE | `/git-connections/{id}` | Read / update / delete. Delete is refused (409, naming the projects) while a project uses the connection |
 | POST | `/git-connections/{id}/test` | Runs `git ls-remote` in the worker, returns `{ok, branches[], default_branch, error}` |
-| GET / POST | `/azure-connections` | List / create, personal or an organization's, as for Git connections |
-| GET / PATCH / DELETE | `/azure-connections/{id}` | Read / update / delete. Delete is refused while a project uses the connection |
-| POST | `/azure-connections/{id}/test` | Runs in the worker, returns `{ok, project_name, error}` |
+| GET / POST | `/board-connections` | List / create, personal or an organization's, as for Git connections. Body `{name, kind, url, scope, secret, organization_id?}`; `kind` defaults to `azure` |
+| GET / PATCH / DELETE | `/board-connections/{id}` | Read / update (`name`, `url`, `scope`, `secret`; the kind is fixed) / delete. Delete is refused while a project uses the connection |
+| POST | `/board-connections/{id}/test` | Runs in the worker, returns `{ok, scope_name, error}` (the project's or board's name) |
 | GET / POST | `/projects` | List (`?scope=all\|owned\|organizations\|shared`, default `all`) / create (personal, or in an organization with `organization_id`, any member). Each project carries the caller's `role`, its `owner` (a user, null for an organization's) and `organization`, the number of `shares`, `schedule_timezone` (the owner's or the organization's), the connection summaries and the dashboard fields (`last_run`, `next_run_at`, `comments_posted`) |
 | GET / PATCH / DELETE | `/projects/{id}` | Read (viewer) / update (editor; connections owner only) / delete (owner) |
 | POST | `/projects/test-pattern` | Body `{pattern, samples[]}`: try a pattern before the project exists |
@@ -296,7 +298,7 @@ The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoin
 | GET | `/runs/{run_id}` | Run detail with counters and `counts_by_action` |
 | GET | `/runs/{run_id}/items` | Paginated items, oldest commit first, filterable by `action` |
 | GET | `/projects/{id}/work-items?q=` | Editor: the board's work items for the review's picker (`{ok, items[{id, title, type, state, closed}], error}`), open first. Runs in the worker |
-| PUT | `/runs/{run_id}/items/{item_id}/work-item` | Editor, finished dry run: body `{work_item_id}`. The row now posts to that work item, and the commit is linked to it (`commit_links`); the row's previous work item is excluded for that commit (or unlinked, if it was linked by hand) |
+| PUT | `/runs/{run_id}/items/{item_id}/work-item` | Editor, finished dry run: body `{work_item_id}` (a string of digits). The row now posts to that work item, and the commit is linked to it (`commit_links`); the row's previous work item is excluded for that commit (or unlinked, if it was linked by hand) |
 | POST / DELETE | `/runs/{run_id}/items/{item_id}/exclude` | Editor, finished dry run: deselect a `would_post` row for good (`commit_exclusions`) / select it again |
 | POST | `/runs/{run_id}/post` | Editor, finished dry run: **Post selected**. Queues a real run (`source_run_id` = the dry run) that posts exactly its `would_post` rows, without a rescan and without moving cursors. Returns `202 {run_id}` |
 | POST | `/runs/{run_id}/cancel` | Cooperative cancel: the worker checks a flag between commits. 409 if already finished |
@@ -306,7 +308,7 @@ The API is JSON under `/api/v1`, with OpenAPI docs at `/api/docs`. Every endpoin
 | POST | `/admin/users/{id}/transfer` | Admin only: body `{to_user_id}`. Gives everything the user owns personally (projects and connections) to an active user; organizations' rows stay |
 | GET | `/admin/organizations` | Admin only: every organization with its members, admins and counts |
 | GET | `/admin/activity` | Admin only: the `audit_events`, newest first (`?actor_id=` to filter) |
-| GET | `/admin/git-connections` · `/admin/azure-connections` | Admin only: every connection with its owner (user or organization) and the number of projects using it. Secrets stay write-only |
+| GET | `/admin/git-connections` · `/admin/board-connections` | Admin only: every connection with its owner (user or organization) and the number of projects using it. Secrets stay write-only |
 | POST | `/admin/organizations/{id}/admins` | Admin only: body `{user_id}`, a member who becomes an admin of the organization |
 | GET | `/admin/transfers` | Admin only: every owner change (Change owner and Transfer all), newest first, with who did it and from/to which user or organization |
 | GET | `/health` · `/ready` | Liveness / readiness (database, Redis) |
@@ -325,14 +327,14 @@ The UI is a responsive single-page app with light and dark themes. Everything a 
 | Dashboard | `/` | One card per project: last run status and time, next scheduled run, comments posted, and **Sync now** / **Dry run** buttons. Projects shared with the user appear under **Shared with me**, with their role and owner |
 | Project detail | `/projects/:id` | Run history table (who started each manual run), **Delete** per run and **Clear dry runs**. **Share** (owner) opens a drawer to share by email, change roles and remove shares; **Change owner** (owner) gives it to an organization or a user; **Leave** (shared users). Click a run to open its item list (commit SHA, message subject, work item ID with a link to Azure, action, detail), with filters by action, **Cancel** and **Delete**. On a finished dry run, editors review it: a checkbox per row (untick = never post), a searchable work item picker for rows without a work item or with a wrong one (**Change**), and **Post selected (N)** |
 | Settings → Git connections | `/settings/git` | List plus a form: name, repo URL, auth type, username (prefilled for the detected host), token or password, commit URL template, **Test connection** (shows the branches found) |
-| Settings → Azure connections | `/settings/azure` | List plus a form: name, organization URL, project, PAT, **Test connection** |
-| Settings → Projects | `/settings/projects`, `/settings/projects/new`, `/settings/projects/:id` | List of the projects the user can see, then the wizard: pick a Git connection → branches → pick an Azure connection → ticket pattern with **live pattern tester** → comment template with **live preview** → start point → schedule. For an editor the connections are locked; a viewer is told only editors can change the settings |
-| Settings → Organizations | `/settings/organizations`, `/settings/organizations/:id` | The user's organizations and **New organization**. An organization's page: name and time zone (admins), members (add by email, roles, remove, leave), its Git and Azure connections (admins add, edit, delete), its projects and **New project** |
+| Settings → Board connections | `/settings/boards` (`/settings/azure` redirects there) | List plus a form. Azure DevOps: name, organization URL, project, PAT, **Test connection** |
+| Settings → Projects | `/settings/projects`, `/settings/projects/new`, `/settings/projects/:id` | List of the projects the user can see, then the wizard: pick a Git connection → branches → pick a board connection → ticket pattern with **live pattern tester** → comment template with **live preview** → start point → schedule. For an editor the connections are locked; a viewer is told only editors can change the settings |
+| Settings → Organizations | `/settings/organizations`, `/settings/organizations/:id` | The user's organizations and **New organization**. An organization's page: name and time zone (admins), members (add by email, roles, remove, leave), its Git and board connections (admins add, edit, delete), its projects and **New project** |
 | Settings → Profile | `/settings/profile` | Display name, time zone, change password |
 | Admin → Users | `/admin/users` | Admins only: list users, turn accounts on or off, **Transfer all** of a user's projects and connections |
 | Admin → Projects | `/admin/projects` | Admins only: every project with its owner (a user or an organization), a link to open it with full rights, **Change owner**, and the transfer history |
 | Admin → Activity | `/admin/activity` | Admins only: what administrators did to other users' data (when, who, action, resource with a link while it exists, owner) |
-| Admin → Connections | `/admin/connections` | Admins only: every Git and Azure connection with its owner, to edit (and test), or delete |
+| Admin → Connections | `/admin/connections` | Admins only: every Git and board connection with its owner, to edit (and test), or delete |
 | Admin → Organizations | `/admin/organizations` | Admins only: every organization with its admins, a link to manage it as its admin; **Make admin** for a member |
 
 **UI rules**
@@ -384,13 +386,13 @@ tickettrail/
 │       ├── config.py           # pydantic-settings, TT_* env vars
 │       ├── db/                 # models, session, repositories (owner-scoped, access rules, transfers)
 │       ├── api/access.py       # permission checks: projects, runs, organizations, connections
-│       ├── api/v1/             # routers: auth, me, git, azure, projects, sharing, organizations, runs, admin
+│       ├── api/v1/             # routers: auth, me, git, boards, projects, sharing, organizations, runs, review, admin
 │       ├── core/               # security, crypto, logging, errors, cron, rate limits
 │       ├── integrations/
 │       │   ├── git/            # GitClient, host detection, URL builders
 │       │   └── trackers/       # WorkItemTracker interface, AzureBoardsClient
 │       ├── sync/               # parser, template renderer, engine, locks
-│       └── worker/             # celery app, tasks, schedule dispatcher
+│       └── worker/             # celery app, tasks, schedule dispatcher, the board client factory
 │   └── tests/                  # unit/, integration/, fixtures/ (sample repos, fake Azure)
 └── frontend/
     ├── Dockerfile              # build stage + nginx stage
@@ -413,7 +415,7 @@ tickettrail/
 | `TT_ALLOW_PRIVATE_HOSTS` | `false` | SSRF guard exception |
 | `TT_GIT_TIMEOUT` | `300` | Seconds per Git command |
 | `TT_MIN_SCHEDULE_MINUTES` | `5` | Shortest schedule interval allowed |
-| `TT_AZURE_MAX_CONCURRENCY` | `5` | Concurrent requests per Azure organization |
+| `TT_BOARD_MAX_CONCURRENCY` | `5` | Concurrent requests per board server (Azure organization). `TT_AZURE_MAX_CONCURRENCY`, its name before M10, is still read |
 | `TT_LOG_LEVEL` | `INFO` | Logging level; logs are JSON |
 | `TT_PUBLIC_URL` | `http://localhost:8080` | Used in links and cookies |
 | `TT_HTTP_PORT` | `8080` | Compose only: the host port the frontend publishes |
@@ -538,6 +540,17 @@ Volumes: `pg_data` (database) and `repos_data` (Git clones). Only `frontend` pub
 - **Dry-run review** *(done)*: a checkbox per row (deselecting excludes the pair for good, `commit_exclusions`), a work item picker searching the board (closed items last) for rows without a work item or with a wrong one (`commit_links`, used by every later run), and **Post selected**, a real run posting exactly the reviewed rows without a rescan. Sync now and scheduled syncs are unchanged but respect links and exclusions.
 - **Releases** *(done)*: a tag `vX.Y.Z` on `main` runs `.github/workflows/release.yml`, which builds the images, pushes them to `ghcr.io/takticodex/tickettrail-backend` / `-frontend` (version and `latest`), and creates a GitHub Release with the release notes from `CHANGELOG.md` and an offline archive of the images. `TT_IMAGE_PREFIX` and `TT_VERSION` make compose run a release instead of building.
 
+**M10 – Planka boards** (branch `milestone/m10-planka`, two gates)
+
+- **Step 1 – Board connections** (no change in behaviour) *(done)*:
+  - *Build:* `azure_connections` becomes `board_connections` with a `kind` (`azure` \| `planka`) and generic columns: `url` (Azure organization URL / Planka server URL), `scope` (Azure project / Planka board ID), `secret_enc` (PAT / API key). `projects.azure_connection_id` becomes `board_connection_id`. Work item IDs become text everywhere (`sync_run_items`, `posted_comments`, `commit_links`, `commit_exclusions`; `azure_comment_id` becomes `comment_id`), so the API returns them as strings: Planka IDs exceed JavaScript's safe integers. Endpoints `/board-connections` and `/admin/board-connections`; Settings → **Board connections** (`/settings/boards`). One factory builds the tracker client for a connection.
+  - *Accept when:* existing data migrates (Azure connections, projects, posted comments, links and exclusions), every Azure flow works as before, all suites pass.
+- **Step 2 – Planka** (Planka v2 only):
+  - *Build:* `PlankaBoardsClient` behind `WorkItemTracker`, authenticated with an API key in the `X-Api-Key` header. A Planka connection is a server URL and a board ID (the form also accepts the board's URL). Calls: test `GET /api/boards/{id}`; cards, lists and custom fields of the board in one `GET /api/boards/{id}` per run (existence check, codes, picker); comment `POST /api/cards/{id}/comments`; recovery `GET /api/cards/{id}/comments` (paged with `beforeId`). Only cards of the project's board count; cards in archived or trashed lists are missing.
+  - *Referencing a card in a commit:* the default Planka pattern `(?:PK#|/cards/)(?P<id>[A-Za-z0-9_-]+)` matches `PK#<card ID>`, `PK#<code>` and a pasted card URL. A captured value made only of digits is a card ID; one with a letter is a **code**.
+  - *Codes:* a card carries a code in a description line `<Tag>: <code>` or in a custom field named `<Tag>`. The tag name is set per project (`card_tag`, default `Coderef`). A code is 2–32 letters, digits, `-` or `_` with at least one letter, compared case-insensitively. Each run reads the board once and turns codes into card IDs, so de-duplication stays on the card ID. A code on no card is `skipped_not_found`; a code on several cards is an `error` naming them. The review's picker also searches codes.
+  - *Accept when:* a Planka connection tests OK, a dry run and a sync post to cards referenced by ID, URL and code (description and custom field), a duplicate code is reported, the picker lists the board's cards with closed ones last, crash recovery finds the marker, and the Playwright test runs one Planka project against a fake Planka.
+
 ## 13. Testing and definition of done
 
 A milestone is done only when its acceptance criteria are met, its tests pass in CI, and the human has approved it at the gate.
@@ -595,3 +608,4 @@ Decisions taken at the milestone gates, already reflected in the sections above.
 | M9 | **Change owner** replaces Transfer (admin) and Move (users); `ownership_transfers` records organizations and the actor | Fewer concepts: one way for a project to change hands, one history |
 | M9 | Dry-run review: deselected commits are excluded for good ("never", not "not now"); manual links persist; Post selected posts the reviewed rows without a rescan | A scheduled sync must not undo a review; the review posts exactly what was looked at |
 | M9 | Images are published to ghcr.io and attached to GitHub Releases per tag, not committed to the repository | Image archives are hundreds of MB: in git they would weigh on every clone forever |
+| M10 | Azure connections become board connections (`kind`, `url`, `scope`, `secret`); work item and comment IDs are text, returned as strings; `TT_AZURE_MAX_CONCURRENCY` becomes `TT_BOARD_MAX_CONCURRENCY` (the old name still works) | One model for Azure DevOps and Planka; Planka card IDs are larger than JavaScript's safe integers |

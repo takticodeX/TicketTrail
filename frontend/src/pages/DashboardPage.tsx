@@ -128,8 +128,8 @@ export function DashboardPage() {
           <Stack gap="xs" align="center" ta="center">
             <Text fw={600}>{others > 0 ? 'No projects of your own yet' : 'No projects yet'}</Text>
             <Text c="dimmed" size="sm" maw={460}>
-              {user ? `Welcome, ${user.display_name}. ` : ''}A project links a Git repository to an
-              Azure DevOps board.
+              {user ? `Welcome, ${user.display_name}. ` : ''}A project links a Git repository to a
+              board, where each commit becomes a comment.
             </Text>
             <Button component={Link} to="/settings/projects/new" mt="xs">
               Create a project

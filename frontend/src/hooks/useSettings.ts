@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import * as api from '../api/settings';
-import type { AzureConnectionInput, GitConnectionInput, ProjectInput } from '../api/types';
+import type { BoardConnectionInput, GitConnectionInput, ProjectInput } from '../api/types';
 import { POLL_MS, isRunActive } from '../lib/runs';
 
 export const settingsKeys = {
   git: ['git-connections'] as const,
-  azure: ['azure-connections'] as const,
+  boards: ['board-connections'] as const,
   projects: ['projects'] as const,
   project: (id: string) => ['projects', id] as const,
 };
@@ -28,11 +28,11 @@ export function useGitConnections(organizationId?: string | null, ownerId?: stri
   });
 }
 
-export function useAzureConnections(organizationId?: string | null, ownerId?: string | null) {
+export function useBoardConnections(organizationId?: string | null, ownerId?: string | null) {
   const scope = { organizationId, ownerId };
   return useQuery({
-    queryKey: [...settingsKeys.azure, ...scopeKey(scope)],
-    queryFn: () => api.listAzureConnections(scope),
+    queryKey: [...settingsKeys.boards, ...scopeKey(scope)],
+    queryFn: () => api.listBoardConnections(scope),
   });
 }
 
@@ -80,28 +80,28 @@ export function useTestGitConnection() {
   });
 }
 
-export function useSaveAzureConnection() {
+export function useSaveBoardConnection() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }: { id?: string; body: AzureConnectionInput }) =>
-      id ? api.updateAzureConnection(id, body) : api.createAzureConnection(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.azure }),
+    mutationFn: ({ id, body }: { id?: string; body: BoardConnectionInput }) =>
+      id ? api.updateBoardConnection(id, body) : api.createBoardConnection(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.boards }),
   });
 }
 
-export function useDeleteAzureConnection() {
+export function useDeleteBoardConnection() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: api.deleteAzureConnection,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.azure }),
+    mutationFn: api.deleteBoardConnection,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.boards }),
   });
 }
 
-export function useTestAzureConnection() {
+export function useTestBoardConnection() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: api.testAzureConnection,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: settingsKeys.azure }),
+    mutationFn: api.testBoardConnection,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: settingsKeys.boards }),
   });
 }
 

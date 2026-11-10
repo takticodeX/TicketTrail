@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from app.core.crypto import SecretDecryptionError
 from app.core.urls import UnsafeUrlError, check_public_host
 from app.db.models import (
-    AzureConnection,
+    BoardConnection,
     CommentStatus,
     GitAuthType,
     GitConnection,
@@ -60,12 +60,12 @@ from app.integrations.git.client import (
     GitNotFoundError,
 )
 from app.integrations.git.hosts import commit_url, repo_name
-from app.integrations.trackers.azure import AzureBoardsClient
 from app.integrations.trackers.base import (
     TrackerAuthError,
     TrackerError,
     TrackerNotFoundError,
     TrackerTransientError,
+    WorkItemTracker,
 )
 from app.sync.lock import NoLock, ProjectLock
 from app.sync.parser import (
@@ -75,13 +75,14 @@ from app.sync.parser import (
     compile_ticket_pattern,
 )
 from app.sync.template import CommentContext, render_comment
+from app.worker.boards import BoardUnavailableError, board_label, open_board
 from app.worker.context import WorkerContext
 
 logger = logging.getLogger(__name__)
 
 MAX_SUBJECT_LENGTH = 500
 HEARTBEAT_SECONDS = 5.0
-AZURE_TIMEOUT_SECONDS = 30.0
+BOARD_TIMEOUT_SECONDS = 30.0
 
 
 def stale_after(context: WorkerContext) -> timedelta:
@@ -101,7 +102,7 @@ class _RunCancelledError(Exception):
 class _Pair:
     commit: Commit
     branch: str
-    work_item_id: int
+    work_item_id: str
     manual: bool = False
 
 
@@ -125,7 +126,7 @@ class _Run:
         commit: Commit,
         branch: str,
         action: ItemAction,
-        work_item_id: int | None = None,
+        work_item_id: str | None = None,
         detail: str | None = None,
         *,
         manual: bool = False,
@@ -271,17 +272,17 @@ class _Entry:
 
     commit: Commit
     branch: str
-    ids: list[int]
+    ids: list[str]
     error: str | None = None
     # Of `ids`, those linked by hand in a review.
-    linked: frozenset[int] = frozenset()
+    linked: frozenset[str] = frozenset()
     # Pairs deselected in a review: recorded as excluded, never posted.
-    excluded: tuple[int, ...] = ()
+    excluded: tuple[str, ...] = ()
 
 
 def _review(
     state: _Run, commits: list[Commit]
-) -> tuple[dict[str, list[int]], set[tuple[str, int]]]:
+) -> tuple[dict[str, list[str]], set[tuple[str, str]]]:
     review = ReviewRepository(state.db, state.project.id)
     shas = [commit.sha for commit in commits]
     return review.links(shas), review.exclusions(shas)
@@ -290,9 +291,9 @@ def _review(
 def _entry(
     commit: Commit,
     branch: str,
-    ids: list[int],
-    links: dict[str, list[int]],
-    exclusions: set[tuple[str, int]],
+    ids: list[str],
+    links: dict[str, list[str]],
+    exclusions: set[tuple[str, str]],
     error: str | None = None,
 ) -> _Entry:
     """Add the commit's manual links to `ids`, and set its excluded pairs apart."""
@@ -325,34 +326,17 @@ def _extract(state: _Run, scan: _Scan, pattern: TicketPattern) -> list[_Entry]:
     return entries
 
 
-# --- Azure ---------------------------------------------------------------------------------
+# --- Board ---------------------------------------------------------------------------------
 
 
-def _tracker(state: _Run, connection: AzureConnection) -> AzureBoardsClient:
-    context = state.context
+def _tracker(state: _Run, connection: BoardConnection) -> WorkItemTracker:
     try:
-        check_public_host(
-            connection.organization_url, allow_private=context.settings.allow_private_hosts
-        )
-    except UnsafeUrlError as exc:
-        raise RunFailedError(f"Organization URL refused: {exc}.") from exc
-    try:
-        pat = context.secret_box.decrypt(connection.pat_enc)
-    except SecretDecryptionError as exc:
-        raise RunFailedError(
-            "The Azure connection's PAT can't be decrypted. Enter it again in Settings."
-        ) from exc
-    return AzureBoardsClient(
-        connection.organization_url,
-        connection.azure_project,
-        pat,
-        timeout=AZURE_TIMEOUT_SECONDS,
-        limiter=context.azure_limiter(connection.organization_url),
-        sleep=context.sleep,
-    )
+        return open_board(state.context, connection, timeout=BOARD_TIMEOUT_SECONDS)
+    except BoardUnavailableError as exc:
+        raise RunFailedError(f"{board_label(connection)}: {exc}") from exc
 
 
-def _recover_pending(state: _Run, tracker: AzureBoardsClient) -> None:
+def _recover_pending(state: _Run, tracker: WorkItemTracker) -> None:
     """Resolve `pending` rows a crashed run left behind (spec section 7, crash recovery).
 
     Skipped while another run of the project is active: its pending rows may be
@@ -369,9 +353,9 @@ def _recover_pending(state: _Run, tracker: AzureBoardsClient) -> None:
         match = next((c for c in comments if marker in c.text), None)
         if match is not None:  # it was posted before the crash: don't post again
             row.status = CommentStatus.POSTED
-            row.azure_comment_id = match.id
+            row.comment_id = match.id
             row.posted_at = datetime.now(UTC)
-        else:  # never reached Azure: drop the guard so the pair is posted below
+        else:  # never reached the board: drop the guard so the pair is posted below
             state.db.delete(row)
         state.heartbeat()
     state.db.commit()
@@ -396,7 +380,7 @@ def _comment_text(state: _Run, pair: _Pair, connection: GitConnection) -> str:
     )
 
 
-def _post(state: _Run, tracker: AzureBoardsClient, pair: _Pair, git: GitConnection) -> None:
+def _post(state: _Run, tracker: WorkItemTracker, pair: _Pair, git: GitConnection) -> None:
     commit, branch, work_item_id = pair.commit, pair.branch, pair.work_item_id
     db = state.db
     guard = PostedComment(
@@ -422,7 +406,7 @@ def _post(state: _Run, tracker: AzureBoardsClient, pair: _Pair, git: GitConnecti
     try:
         comment_id = tracker.add_comment(work_item_id, _comment_text(state, pair, git))
     except TrackerTransientError as exc:
-        # The comment may have reached Azure (for example a timeout after sending):
+        # The comment may have reached the board (for example a timeout after sending):
         # keep the guard pending; the next run checks for the marker.
         state.blocked.add(commit.sha)
         state.item(
@@ -453,7 +437,7 @@ def _post(state: _Run, tracker: AzureBoardsClient, pair: _Pair, git: GitConnecti
         return
 
     guard.status = CommentStatus.POSTED
-    guard.azure_comment_id = comment_id
+    guard.comment_id = comment_id
     guard.posted_at = datetime.now(UTC)
     state.item(
         commit, branch, ItemAction.POSTED, work_item_id, f"Comment {comment_id}", manual=pair.manual
@@ -462,7 +446,7 @@ def _post(state: _Run, tracker: AzureBoardsClient, pair: _Pair, git: GitConnecti
 
 
 def _process(
-    state: _Run, entries: list[_Entry], azure: AzureConnection, git: GitConnection
+    state: _Run, entries: list[_Entry], board: BoardConnection, git: GitConnection
 ) -> bool:
     """Steps 5-7, recording one item per commit or pair, oldest commit first.
 
@@ -475,10 +459,10 @@ def _process(
         for work_item_id in e.ids
     ]
     with ExitStack() as stack:
-        tracker = stack.enter_context(_tracker(state, azure)) if pairs else None
-        posted: set[tuple[str, int]] = set()
-        found: set[int] = set()
-        if tracker is not None:  # no references at all: Azure isn't needed
+        tracker = stack.enter_context(_tracker(state, board)) if pairs else None
+        posted: set[tuple[str, str]] = set()
+        found: set[str] = set()
+        if tracker is not None:  # no references at all: the board isn't needed
             if not state.run.dry_run:
                 _recover_pending(state, tracker)
             existing = PostedCommentRepository(state.db, state.project.id).for_commits(
@@ -553,8 +537,8 @@ def _move_cursors(state: _Run, scan: _Scan) -> None:
 def _execute(state: _Run) -> None:
     db, project = state.db, state.project
     git = db.get(GitConnection, project.git_connection_id)
-    azure = db.get(AzureConnection, project.azure_connection_id)
-    if git is None or azure is None:  # protected by foreign keys; defensive
+    board = db.get(BoardConnection, project.board_connection_id)
+    if git is None or board is None:  # protected by foreign keys; defensive
         raise RunFailedError("The project's connections no longer exist.")
     try:
         pattern = compile_ticket_pattern(project.ticket_pattern)
@@ -562,19 +546,12 @@ def _execute(state: _Run) -> None:
         raise RunFailedError(f"The ticket pattern {exc}.") from exc
 
     if state.run.source_run_id is not None:
-        _execute_selected(state, git, azure)
+        _execute_selected(state, git, board)
         return
     scan = _scan_git(state, git)
     state.heartbeat(force=True)
     entries = _extract(state, scan, pattern)
-    try:
-        cancelled = _process(state, entries, azure, git)
-    except TrackerAuthError as exc:
-        azure.last_test_ok = False  # show the connection as failing in Settings
-        azure.last_test_at = datetime.now(UTC)
-        raise RunFailedError(f"Azure DevOps: {exc}") from exc
-    except TrackerError as exc:  # the existence check or recovery could not complete
-        raise RunFailedError(f"Azure DevOps: {exc}") from exc
+    cancelled = _process_board(state, entries, board, git)
     if not state.run.dry_run:  # dry runs never move cursors
         _move_cursors(state, scan)
     if cancelled:
@@ -585,7 +562,21 @@ def _execute(state: _Run) -> None:
         )
 
 
-def _execute_selected(state: _Run, git: GitConnection, azure: AzureConnection) -> None:
+def _process_board(
+    state: _Run, entries: list[_Entry], board: BoardConnection, git: GitConnection
+) -> bool:
+    """`_process`, with the board's failures turned into a failed run."""
+    try:
+        return _process(state, entries, board, git)
+    except TrackerAuthError as exc:
+        board.last_test_ok = False  # show the connection as failing in Settings
+        board.last_test_at = datetime.now(UTC)
+        raise RunFailedError(f"{board_label(board)}: {exc}") from exc
+    except TrackerError as exc:  # the existence check or recovery could not complete
+        raise RunFailedError(f"{board_label(board)}: {exc}") from exc
+
+
+def _execute_selected(state: _Run, git: GitConnection, board: BoardConnection) -> None:
     """Post exactly what a reviewed dry run would post: no scan, no cursor moves.
 
     The pairs are the source run's `would_post` items, as the review left them.
@@ -615,7 +606,7 @@ def _execute_selected(state: _Run, git: GitConnection, azure: AzureConnection) -
     state.run.commits_scanned = len(commits)
     state.heartbeat(force=True)
 
-    by_commit: dict[str, tuple[str, list[int], set[int]]] = {}
+    by_commit: dict[str, tuple[str, list[str], set[str]]] = {}
     for item in items:
         if item.work_item_id is None:
             continue
@@ -634,14 +625,7 @@ def _execute_selected(state: _Run, git: GitConnection, azure: AzureConnection) -
         for sha, (branch, ids, manual) in by_commit.items()
         if sha in commits
     ]
-    try:
-        cancelled = _process(state, entries, azure, git)
-    except TrackerAuthError as exc:
-        azure.last_test_ok = False
-        azure.last_test_at = datetime.now(UTC)
-        raise RunFailedError(f"Azure DevOps: {exc}") from exc
-    except TrackerError as exc:
-        raise RunFailedError(f"Azure DevOps: {exc}") from exc
+    cancelled = _process_board(state, entries, board, git)
     if cancelled:
         raise _RunCancelledError("Cancelled by the user; what was posted stays posted.")
 

@@ -1,6 +1,6 @@
 import { apiRequest } from './client';
 import type {
-  AzureConnection,
+  BoardConnection,
   GitConnection,
   OrganizationMember,
   OrganizationSummary,
@@ -87,13 +87,13 @@ export interface ConnectionOwner {
 }
 
 export type AdminGitConnection = GitConnection & ConnectionOwner;
-export type AdminAzureConnection = AzureConnection & ConnectionOwner;
+export type AdminBoardConnection = BoardConnection & ConnectionOwner;
 
 export const listAllGitConnections = (page: number, pageSize = 100) =>
   apiRequest<Page<AdminGitConnection>>(`/admin/git-connections?page=${page}&page_size=${pageSize}`);
 
-export const listAllAzureConnections = (page: number, pageSize = 100) =>
-  apiRequest<Page<AdminAzureConnection>>(`/admin/azure-connections?page=${page}&page_size=${pageSize}`);
+export const listAllBoardConnections = (page: number, pageSize = 100) =>
+  apiRequest<Page<AdminBoardConnection>>(`/admin/board-connections?page=${page}&page_size=${pageSize}`);
 
 /** An administrator's action on someone else's data. */
 export interface AuditEvent {
@@ -103,7 +103,7 @@ export interface AuditEvent {
   actor_email: string;
   /** A verb such as "update", "delete", "sync" or "share". */
   action: string;
-  resource_type: 'project' | 'run' | 'git_connection' | 'azure_connection' | 'organization';
+  resource_type: 'project' | 'run' | 'git_connection' | 'board_connection' | 'organization';
   resource_id: string | null;
   resource_name: string;
   /** Whose it is: an email, or "organization <name>". */

@@ -1,8 +1,8 @@
 import { apiRequest } from './client';
 import type {
-  AzureConnection,
-  AzureConnectionInput,
-  AzureTestResult,
+  BoardConnection,
+  BoardConnectionInput,
+  BoardTestResult,
   GitConnection,
   GitConnectionInput,
   GitTestResult,
@@ -37,16 +37,16 @@ export const deleteGitConnection = (id: string) =>
 export const testGitConnection = (id: string) =>
   apiRequest<GitTestResult>(`/git-connections/${id}/test`, { method: 'POST' });
 
-export const listAzureConnections = (scope?: ConnectionScope) =>
-  apiRequest<Page<AzureConnection>>(`/azure-connections${ALL}${scopeQuery(scope)}`);
-export const createAzureConnection = (body: AzureConnectionInput) =>
-  apiRequest<AzureConnection>('/azure-connections', { method: 'POST', body });
-export const updateAzureConnection = (id: string, body: Partial<AzureConnectionInput>) =>
-  apiRequest<AzureConnection>(`/azure-connections/${id}`, { method: 'PATCH', body });
-export const deleteAzureConnection = (id: string) =>
-  apiRequest<void>(`/azure-connections/${id}`, { method: 'DELETE' });
-export const testAzureConnection = (id: string) =>
-  apiRequest<AzureTestResult>(`/azure-connections/${id}/test`, { method: 'POST' });
+export const listBoardConnections = (scope?: ConnectionScope) =>
+  apiRequest<Page<BoardConnection>>(`/board-connections${ALL}${scopeQuery(scope)}`);
+export const createBoardConnection = (body: BoardConnectionInput) =>
+  apiRequest<BoardConnection>('/board-connections', { method: 'POST', body });
+export const updateBoardConnection = (id: string, body: Partial<BoardConnectionInput>) =>
+  apiRequest<BoardConnection>(`/board-connections/${id}`, { method: 'PATCH', body });
+export const deleteBoardConnection = (id: string) =>
+  apiRequest<void>(`/board-connections/${id}`, { method: 'DELETE' });
+export const testBoardConnection = (id: string) =>
+  apiRequest<BoardTestResult>(`/board-connections/${id}/test`, { method: 'POST' });
 
 export const listProjects = () => apiRequest<Page<Project>>(`/projects${ALL}`);
 export const getProject = (id: string) => apiRequest<Project>(`/projects/${id}`);

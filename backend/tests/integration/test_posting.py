@@ -138,10 +138,10 @@ def test_posts_one_comment_per_pair_from_the_template(
     assert run["status"] == "success"
     assert run["comments_posted"] == 3
     assert actions(client, headers, run) == [
-        (12, "posted"),
+        ("12", "posted"),
         (None, "no_reference"),
-        (45, "posted"),
-        (46, "posted"),
+        ("45", "posted"),
+        ("46", "posted"),
     ]
     assert (board.count(12), board.count(45), board.count(46)) == (1, 1, 1)
     [comment] = board.texts(12)
@@ -214,7 +214,10 @@ def test_full_rescan_without_cursors_posts_nothing_twice(
         conn.execute(text("DELETE FROM project_cursors"))
 
     rescan = sync(client, headers, project)
-    assert actions(client, headers, rescan) == [(1, "skipped_duplicate"), (2, "skipped_duplicate")]
+    assert actions(client, headers, rescan) == [
+        ("1", "skipped_duplicate"),
+        ("2", "skipped_duplicate"),
+    ]
     assert rescan["skipped"] == 2
     assert board.total_comments() == 2
 
@@ -245,7 +248,7 @@ def test_crash_after_post_before_database_update(
         statuses = conn.execute(
             text("SELECT work_item_id, status FROM posted_comments ORDER BY work_item_id")
         ).all()
-    assert statuses == [(1, "posted"), (2, "pending")]
+    assert statuses == [("1", "posted"), ("2", "pending")]
 
     age_runs(db_engine)  # the crashed run's heartbeat has stopped
     recovered = sync(client, headers, project)
@@ -253,8 +256,8 @@ def test_crash_after_post_before_database_update(
     assert recovered["status"] == "success"
     assert (board.count(1), board.count(2)) == (1, 1)  # exactly one comment each
     assert actions(client, headers, recovered) == [
-        (1, "skipped_duplicate"),
-        (2, "skipped_duplicate"),
+        ("1", "skipped_duplicate"),
+        ("2", "skipped_duplicate"),
     ]
     crashed_run = client.get(f"/api/v1/runs/{crashed}", headers=headers).json()
     assert crashed_run["status"] == "failed"
@@ -279,7 +282,7 @@ def test_crash_before_the_post_reaches_azure(
 
     age_runs(db_engine)
     recovered = sync(client, headers, project)
-    assert actions(client, headers, recovered) == [(1, "posted")]
+    assert actions(client, headers, recovered) == [("1", "posted")]
     assert board.count(1) == 1
 
 
@@ -335,7 +338,7 @@ def test_force_pushed_branch_posts_only_new_commits(
 
     after = sync(client, headers, project)
     assert "rewritten" in after["error_message"]
-    assert actions(client, headers, after) == [(1, "skipped_duplicate"), (3, "posted")]
+    assert actions(client, headers, after) == [("1", "skipped_duplicate"), ("3", "posted")]
     assert [board.count(i) for i in (1, 2, 3)] == [1, 1, 1]
 
 
@@ -360,7 +363,7 @@ def test_401_stops_the_run_and_marks_the_connection_failing(
     assert board.posts == 0
     assert cursors(db_engine) == {}
     azure = client.get(
-        f"/api/v1/azure-connections/{project['azure_connection_id']}", headers=headers
+        f"/api/v1/board-connections/{project['board_connection_id']}", headers=headers
     ).json()
     assert azure["last_test_ok"] is False
 
@@ -381,7 +384,7 @@ def test_401_while_posting_stops_without_a_stray_guard(
     assert run["status"] == "failed"
     with db_engine.connect() as conn:
         rows = conn.execute(text("SELECT work_item_id, status FROM posted_comments")).all()
-    assert rows == [(1, "posted")]  # the refused pair has no guard: it will be posted later
+    assert rows == [("1", "posted")]  # the refused pair has no guard: it will be posted later
 
 
 def test_wrong_azure_project_fails_and_keeps_the_cursor(
@@ -413,9 +416,9 @@ def test_missing_work_item_is_skipped(
     run = sync(client, headers, project_for(origin))
     assert run["status"] == "success"
     assert actions(client, headers, run) == [
-        (1, "posted"),
-        (999, "skipped_not_found"),
-        (2, "posted"),
+        ("1", "posted"),
+        ("999", "skipped_not_found"),
+        ("2", "posted"),
     ]
     assert run["skipped"] == 1
     assert cursors(db_engine) == {"main": tip}  # skipped for good: the cursor moves on
@@ -431,7 +434,7 @@ def test_work_item_deleted_between_check_and_post(
     origin.commit("AB#1")
     board.next_posts.append(httpx.Response(404))
     run = sync(client, headers, project_for(origin))
-    assert actions(client, headers, run) == [(1, "skipped_not_found")]
+    assert actions(client, headers, run) == [("1", "skipped_not_found")]
 
 
 def test_429_honours_retry_after_and_then_posts(
@@ -468,12 +471,12 @@ def test_lasting_503_keeps_the_cursor_and_the_next_run_posts_once(
 
     run = sync(client, headers, project)
     assert run["status"] == "partial"
-    assert actions(client, headers, run) == [(1, "posted"), (2, "error"), (3, "posted")]
+    assert actions(client, headers, run) == [("1", "posted"), ("2", "error"), ("3", "posted")]
     assert cursors(db_engine) == {"main": first}  # not past the failed commit
 
     retry = sync(client, headers, project)
     assert retry["status"] == "success"
-    assert actions(client, headers, retry) == [(2, "posted"), (3, "skipped_duplicate")]
+    assert actions(client, headers, retry) == [("2", "posted"), ("3", "skipped_duplicate")]
     assert [board.count(i) for i in (1, 2, 3)] == [1, 1, 1]
 
 
@@ -490,7 +493,7 @@ def test_refused_comment_is_an_error_that_does_not_block(
     board.next_posts.append(httpx.Response(400, json={"message": "bad"}))
     run = sync(client, headers, project_for(origin))
     assert run["status"] == "partial"
-    assert actions(client, headers, run) == [(1, "error"), (2, "posted")]
+    assert actions(client, headers, run) == [("1", "error"), ("2", "posted")]
     assert cursors(db_engine) == {"main": tip}
 
 
@@ -514,9 +517,9 @@ def test_dry_run_shows_duplicates_and_missing_items(
 
     dry = sync(client, headers, project, dry_run=True)
     assert actions(client, headers, dry) == [
-        (1, "skipped_duplicate"),
-        (2, "would_post"),
-        (999, "skipped_not_found"),
+        ("1", "skipped_duplicate"),
+        ("2", "would_post"),
+        ("999", "skipped_not_found"),
     ]
     assert board.total_comments() == 1
     assert cursors(db_engine) == {}  # dry runs never move cursors

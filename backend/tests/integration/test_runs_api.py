@@ -124,7 +124,7 @@ def test_items_filter_and_paginate(
         "commit 5 AB#5",
     ]
     would_post = client.get(url, headers=headers, params={"action": "would_post"}).json()
-    assert [i["work_item_id"] for i in would_post["items"]] == [1, 3, 5]
+    assert [i["work_item_id"] for i in would_post["items"]] == ["1", "3", "5"]
     second_page = client.get(url, headers=headers, params={"page": 2, "page_size": 2}).json()
     assert [i["commit_subject"] for i in second_page["items"]] == ["commit 3 AB#3", "commit 4"]
     assert client.get(url, headers=headers, params={"action": "bogus"}).status_code == 422

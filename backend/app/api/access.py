@@ -208,7 +208,7 @@ def organization_for(
     return found
 
 
-_RESOURCE_TYPES = {"Git connection": "git_connection", "Azure connection": "azure_connection"}
+_RESOURCE_TYPES = {"Git connection": "git_connection", "Board connection": "board_connection"}
 
 
 def connection_for[C: OwnedModel](

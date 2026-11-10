@@ -22,7 +22,7 @@ from tests.integration.helpers import (
 def stored(db_engine: Engine) -> tuple[str, str]:
     with db_engine.connect() as conn:
         git = conn.execute(text("SELECT secret_enc FROM git_connections")).scalar_one()
-        azure = conn.execute(text("SELECT pat_enc FROM azure_connections")).scalar_one()
+        azure = conn.execute(text("SELECT secret_enc FROM board_connections")).scalar_one()
     return git, azure
 
 
@@ -34,7 +34,7 @@ def test_rotate_keys_re_encrypts_every_secret(
     with TestClient(app) as client:  # type: ignore[arg-type]
         headers = signed_in(client, "admin@example.com")
         create(client, "git-connections", headers, git_payload())
-        create(client, "azure-connections", headers, azure_payload())
+        create(client, "board-connections", headers, azure_payload())
 
     new_key = Fernet.generate_key().decode()
     box = SecretBox(new_key, old_key)

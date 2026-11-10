@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AdminAzureConnection, AdminGitConnection, AdminProject, AuditEvent } from '../../api/admin';
+import type { AdminBoardConnection, AdminGitConnection, AdminProject, AuditEvent } from '../../api/admin';
 import type { Project } from '../../api/types';
 import { useAuth } from '../../hooks/useAuth';
 import { OWN_PROJECT, authValue, jsonResponse, mockFetch, renderWithProviders } from '../../test/utils';
@@ -24,7 +24,7 @@ const bobsProject: Project = {
   id: 'p1',
   name: 'Billing',
   git_connection_id: 'g1',
-  azure_connection_id: 'a1',
+  board_connection_id: 'a1',
   branches: [],
   ticket_pattern: 'AB#(\\d+)',
   comment_template: '{subject} tt:{sha}',
@@ -89,7 +89,7 @@ describe('administrator access', () => {
       'GET /api/v1/organizations': () => jsonResponse([]),
       'GET /api/v1/git-connections?page_size=100&owner_id=u2': () =>
         page([{ id: 'g1', name: "Bob's repo", repo_url: 'https://github.com/bob/app', commit_url_pattern: '' }]),
-      'GET /api/v1/azure-connections?page_size=100&owner_id=u2': () => page([]),
+      'GET /api/v1/board-connections?page_size=100&owner_id=u2': () => page([]),
     });
     renderWithProviders(
       <Routes>
@@ -126,8 +126,8 @@ describe('administrator access', () => {
       id: 'a1',
       name: 'Acme board',
       organization_id: 'o1',
-      organization_url: 'https://dev.azure.com/acme',
-      azure_project: 'Web',
+      kind: 'azure', url: 'https://dev.azure.com/acme',
+      scope: 'Web',
       has_secret: true,
       last_test_at: null,
       last_test_ok: null,
@@ -136,10 +136,10 @@ describe('administrator access', () => {
       owner: null,
       organization: { id: 'o1', name: 'Acme' },
       projects: 0,
-    } as AdminAzureConnection;
+    } as AdminBoardConnection;
     mockFetch({
       'GET /api/v1/admin/git-connections?page=1&page_size=100': () => page([git]),
-      'GET /api/v1/admin/azure-connections?page=1&page_size=100': () => page([azure]),
+      'GET /api/v1/admin/board-connections?page=1&page_size=100': () => page([azure]),
     });
     renderWithProviders(<AdminConnectionsPage />);
     const table = await screen.findByRole('table', { name: 'All connections' });

@@ -20,7 +20,7 @@ import { useAuth } from '../hooks/useAuth';
 const SETTINGS_LINKS = [
   { to: '/settings/projects', label: 'Projects' },
   { to: '/settings/git', label: 'Git connections' },
-  { to: '/settings/azure', label: 'Azure connections' },
+  { to: '/settings/boards', label: 'Board connections' },
   { to: '/settings/organizations', label: 'Organizations' },
   { to: '/settings/profile', label: 'Profile' },
 ];

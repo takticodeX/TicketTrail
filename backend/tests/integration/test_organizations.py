@@ -96,7 +96,7 @@ def org_connections(client: TestClient, by: Person, org: dict[str, Any]) -> tupl
     )
     azure = create(
         client,
-        "azure-connections",
+        "board-connections",
         by.headers,
         azure_payload(name="Acme board", organization_id=org["id"]),
     )
@@ -115,7 +115,7 @@ def org_project(
             "name": "Shop",
             "organization_id": org["id"],
             "git_connection_id": git_id,
-            "azure_connection_id": azure_id,
+            "board_connection_id": azure_id,
             **extra,
         },
     )
@@ -249,7 +249,7 @@ def test_members_test_the_organizations_connections(
     client: TestClient, ada: Person, ben: Person, org: dict[str, Any]
 ) -> None:
     _, azure_id = org_connections(client, ada, org)
-    result = client.post(f"{API}/azure-connections/{azure_id}/test", headers=ben.headers).json()
+    result = client.post(f"{API}/board-connections/{azure_id}/test", headers=ben.headers).json()
     assert result["ok"] is True
 
 
@@ -299,7 +299,7 @@ def test_an_organization_project_uses_the_organizations_connections_only(
             "name": "Shop",
             "organization_id": org["id"],
             "git_connection_id": personal_git,
-            "azure_connection_id": azure_id,
+            "board_connection_id": azure_id,
         },
     )
     assert response.status_code == 422
@@ -385,7 +385,7 @@ def test_project_names_are_unique_per_organization(
             "name": "Shop",
             "organization_id": org["id"],
             "git_connection_id": git_id,
-            "azure_connection_id": azure_id,
+            "board_connection_id": azure_id,
         },
     )
     assert (
@@ -476,7 +476,7 @@ def test_connections_still_used_personally_are_copied_into_the_organization(
         ada.headers,
         name="Two",
         git_connection_id=first["git_connection_id"],
-        azure_connection_id=first["azure_connection_id"],
+        board_connection_id=first["board_connection_id"],
     )
     moved = client.post(
         f"{API}/projects/{first['id']}/owner",
@@ -541,7 +541,7 @@ def test_an_organization_is_deleted_only_when_empty(
     assert code(busy) == "organization_not_empty"
     assert busy.json()["error"]["details"] == {"projects": 0, "connections": 2}
     client.delete(f"{API}/git-connections/{git_id}", headers=ada.headers)
-    client.delete(f"{API}/azure-connections/{azure_id}", headers=ada.headers)
+    client.delete(f"{API}/board-connections/{azure_id}", headers=ada.headers)
     assert client.delete(url, headers=ada.headers).status_code == 204
 
 

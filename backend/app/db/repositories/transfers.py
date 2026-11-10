@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.db.base import OwnedModel
 from app.db.models import (
-    AzureConnection,
+    BoardConnection,
     GitConnection,
     Organization,
     OwnershipTransfer,
@@ -33,7 +33,7 @@ _GIT_COPIED = (
     "secret_enc",
     "commit_url_template",
 )
-_AZURE_COPIED = ("organization_url", "azure_project", "pat_enc")
+_BOARD_COPIED = ("kind", "url", "scope", "secret_enc")
 
 
 @dataclass(frozen=True)
@@ -106,7 +106,7 @@ def _hand_over(
     session.flush()
 
 
-def _copy[C: (GitConnection, AzureConnection)](
+def _copy[C: (GitConnection, BoardConnection)](
     session: Session, original: C, copied: tuple[str, ...], previous: Owner, to: Owner
 ) -> C:
     copy = type(original)(
@@ -147,8 +147,8 @@ def move_project(session: Session, project: Project, previous: Owner, to: Owner)
         drop_shares(session, [project.id], to.user_id)
 
     git = session.get(GitConnection, project.git_connection_id)
-    azure = session.get(AzureConnection, project.azure_connection_id)
-    assert git is not None and azure is not None  # noqa: S101  (RESTRICT foreign keys)
+    board = session.get(BoardConnection, project.board_connection_id)
+    assert git is not None and board is not None  # noqa: S101  (RESTRICT foreign keys)
     if _still_used(session, Project.git_connection_id, git.id, previous):
         project.git_connection_id = _copy(session, git, _GIT_COPIED, previous, to).id
         tally.copied += 1
@@ -158,14 +158,14 @@ def move_project(session: Session, project: Project, previous: Owner, to: Owner)
     else:
         _hand_over(session, git, previous, to, tally, "Git connection")
         tally.moved += 1
-    if _still_used(session, Project.azure_connection_id, azure.id, previous):
-        project.azure_connection_id = _copy(session, azure, _AZURE_COPIED, previous, to).id
+    if _still_used(session, Project.board_connection_id, board.id, previous):
+        project.board_connection_id = _copy(session, board, _BOARD_COPIED, previous, to).id
         tally.copied += 1
         tally.notes.append(
-            f'Azure connection "{azure.name}" copied (still used by {previous.describe})'
+            f'Board connection "{board.name}" copied (still used by {previous.describe})'
         )
     else:
-        _hand_over(session, azure, previous, to, tally, "Azure connection")
+        _hand_over(session, board, previous, to, tally, "Board connection")
         tally.moved += 1
     session.flush()
     return tally
@@ -229,8 +229,8 @@ def transfer_everything(
     for project in projects:
         _hand_over(session, project, source, target, tally, "Project")
         tally.projects += 1
-    for model in (GitConnection, AzureConnection):
-        kind = "Git connection" if model is GitConnection else "Azure connection"
+    for model in (GitConnection, BoardConnection):
+        kind = "Git connection" if model is GitConnection else "Board connection"
         for connection in session.scalars(select(model).where(model.owner_id == previous.id)).all():
             _hand_over(session, connection, source, target, tally, kind)
             tally.moved += 1
@@ -249,5 +249,5 @@ def transfer_everything(
 def owns_anything(session: Session, user_id: uuid.UUID) -> bool:
     return any(
         session.scalar(select(func.count()).select_from(model).where(model.owner_id == user_id))
-        for model in (Project, GitConnection, AzureConnection)
+        for model in (Project, GitConnection, BoardConnection)
     )

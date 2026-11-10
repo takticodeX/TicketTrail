@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
-    AzureConnection,
+    BoardConnection,
     GitConnection,
     Organization,
     OrganizationMember,
@@ -132,6 +132,6 @@ def owned_counts(session: Session, organization_id: uuid.UUID) -> tuple[int, int
             select(func.count()).select_from(model).where(model.organization_id == organization_id)
         )
         or 0
-        for model in (GitConnection, AzureConnection)
+        for model in (GitConnection, BoardConnection)
     )
     return projects or 0, connections

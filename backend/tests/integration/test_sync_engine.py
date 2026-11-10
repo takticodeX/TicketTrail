@@ -98,10 +98,10 @@ def test_dry_run_lists_each_commit_with_its_ids(
     assert run["comments_posted"] == 0
     assert run["counts_by_action"] == {"would_post": 3, "no_reference": 1}
     assert pairs(items(client, headers, run)) == [
-        ("Fix login AB#12", 12, "would_post"),
+        ("Fix login AB#12", "12", "would_post"),
         ("chore: bump deps", None, "no_reference"),
-        ("Refactor billing AB#45", 45, "would_post"),
-        ("Refactor billing AB#45", 46, "would_post"),
+        ("Refactor billing AB#45", "45", "would_post"),
+        ("Refactor billing AB#45", "46", "would_post"),
     ]
     first = items(client, headers, run)[0]
     assert first["branch"] == "main"
@@ -135,7 +135,7 @@ def test_merge_commits_are_skipped_by_default(
     run = dry_run(client, headers, project_for(origin))
     assert pairs(items(client, headers, run)) == [
         ("base", None, "no_reference"),
-        ("Feature AB#7", 7, "would_post"),
+        ("Feature AB#7", "7", "would_post"),
     ]
 
 
@@ -149,7 +149,7 @@ def test_merge_commits_can_be_included(
     origin.merge("feature", "Merge feature (AB#8)")
 
     run = dry_run(client, headers, project_for(origin, include_merge_commits=True))
-    assert ("Merge feature (AB#8)", 8, "would_post") in pairs(items(client, headers, run))
+    assert ("Merge feature (AB#8)", "8", "would_post") in pairs(items(client, headers, run))
 
 
 def test_default_branch_is_used_when_none_configured(
@@ -161,7 +161,7 @@ def test_default_branch_is_used_when_none_configured(
 
     run = dry_run(client, headers, project_for(origin))
     assert {i["branch"] for i in items(client, headers, run)} == {"trunk"}
-    assert [i["work_item_id"] for i in items(client, headers, run)] == [1, 2]
+    assert [i["work_item_id"] for i in items(client, headers, run)] == ["1", "2"]
 
 
 def test_shared_commits_count_once_across_branches(
@@ -175,7 +175,7 @@ def test_shared_commits_count_once_across_branches(
 
     run = dry_run(client, headers, project_for(origin, branches=["main", "release"]))
     assert run["commits_scanned"] == 3
-    assert sorted(i["work_item_id"] for i in items(client, headers, run)) == [1, 2, 3]
+    assert sorted(i["work_item_id"] for i in items(client, headers, run)) == ["1", "2", "3"]
 
 
 def test_start_from_a_date(
@@ -185,7 +185,7 @@ def test_start_from_a_date(
     origin.commit("Jan 2 AB#2")
     origin.commit("Jan 3 AB#3")
     run = dry_run(client, headers, project_for(origin, start_from="2026-01-02"))
-    assert [i["work_item_id"] for i in items(client, headers, run)] == [2, 3]
+    assert [i["work_item_id"] for i in items(client, headers, run)] == ["2", "3"]
 
 
 def test_start_from_a_commit(
@@ -195,7 +195,7 @@ def test_start_from_a_commit(
     start = origin.commit("two AB#2")
     origin.commit("three AB#3")
     run = dry_run(client, headers, project_for(origin, start_from=start))
-    assert [i["work_item_id"] for i in items(client, headers, run)] == [3]
+    assert [i["work_item_id"] for i in items(client, headers, run)] == ["3"]
 
 
 def test_unknown_start_commit_fails_the_run(
@@ -215,7 +215,7 @@ def test_missing_branch_makes_a_partial_run(
     assert run["status"] == "partial"
     assert run["errors"] == 1
     assert "'gone' does not exist" in run["error_message"]
-    assert [i["work_item_id"] for i in items(client, headers, run)] == [1]
+    assert [i["work_item_id"] for i in items(client, headers, run)] == ["1"]
 
 
 def test_dry_runs_do_not_move_cursors(
@@ -231,7 +231,7 @@ def test_dry_runs_do_not_move_cursors(
     origin.commit("two AB#2")
     second = dry_run(client, headers, project)  # sees the whole history again
 
-    assert [i["work_item_id"] for i in items(client, headers, second)] == [1, 2]
+    assert [i["work_item_id"] for i in items(client, headers, second)] == ["1", "2"]
     with db_engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM project_cursors")).scalar_one() == 0
 
@@ -260,7 +260,7 @@ def test_cursor_limits_the_scan(
     _set_cursor(db_engine, project, done)  # as a real sync (Milestone 5) would leave it
 
     run = dry_run(client, headers, project)
-    assert [i["work_item_id"] for i in items(client, headers, run)] == [2]
+    assert [i["work_item_id"] for i in items(client, headers, run)] == ["2"]
 
 
 def test_force_push_falls_back_to_a_full_scan(
@@ -280,7 +280,7 @@ def test_force_push_falls_back_to_a_full_scan(
     run = dry_run(client, headers, project)
     assert run["status"] == "success"
     assert "history of 'main' was rewritten" in run["error_message"]
-    assert [i["work_item_id"] for i in items(client, headers, run)] == [1, 3]
+    assert [i["work_item_id"] for i in items(client, headers, run)] == ["1", "3"]
 
 
 def test_pattern_timeout_is_an_item_error(
@@ -294,7 +294,7 @@ def test_pattern_timeout_is_an_item_error(
     actions = items(client, headers, run)
     assert actions[0]["action"] == "error"
     assert "took too long" in actions[0]["detail"]
-    assert (actions[1]["work_item_id"], actions[1]["action"]) == (5, "would_post")
+    assert (actions[1]["work_item_id"], actions[1]["action"]) == ("5", "would_post")
 
 
 def test_unreachable_repository_fails_the_run(

@@ -1,14 +1,14 @@
-"""Git and Azure DevOps connections. Secrets are write-only: responses carry has_secret."""
+"""Git and board connections. Secrets are write-only: responses carry has_secret."""
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from app.api.v1.schemas.common import Name, Secret
 from app.core.urls import UnsafeUrlError, normalise_https_url
-from app.db.models import GitAuthType
+from app.db.models import BoardKind, GitAuthType
 from app.integrations.git.hosts import GitHost
 
 
@@ -43,7 +43,6 @@ CommitUrlTemplate = Annotated[
     str | None, Field(max_length=2048), AfterValidator(_commit_url_template)
 ]
 Username = Annotated[str | None, Field(max_length=255), AfterValidator(_optional_text)]
-AzureProjectName = Annotated[str, Field(min_length=1, max_length=255)]
 
 
 # --- Git -------------------------------------------------------------------------------------
@@ -118,42 +117,51 @@ class GitTestResult(BaseModel):
     error: str | None = None
 
 
-# --- Azure DevOps ----------------------------------------------------------------------------
+# --- Boards (Azure DevOps, Planka) ----------------------------------------------------------
+
+BoardUrl = Annotated[HttpsUrl, AfterValidator(lambda url: url.rstrip("/"))]
+BoardScope = Annotated[str, Field(min_length=1, max_length=255), AfterValidator(str.strip)]
+# Planka arrives in the next step; until then only Azure boards can be created.
+SupportedKind = Literal[BoardKind.AZURE]
 
 
-class AzureConnectionCreate(BaseModel):
+class BoardConnectionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: Name
     organization_id: uuid.UUID | None = Field(
         default=None, description="Create it for this organization (its admins only)"
     )
-    organization_url: Annotated[HttpsUrl, AfterValidator(lambda url: url.rstrip("/"))] = Field(
-        description="For example https://dev.azure.com/acme"
+    kind: SupportedKind = BoardKind.AZURE
+    url: BoardUrl = Field(
+        description="Azure: the organization URL, e.g. https://dev.azure.com/acme"
     )
-    azure_project: Annotated[AzureProjectName, AfterValidator(str.strip)]
-    pat: Annotated[Secret, Field(min_length=1, description="Personal access token (write-only)")]
+    scope: BoardScope = Field(description="Azure: the project name")
+    secret: Annotated[
+        Secret, Field(min_length=1, description="Azure: a personal access token (write-only)")
+    ]
 
 
-class AzureConnectionUpdate(BaseModel):
-    """Omitted fields stay as they are. An empty PAT keeps the saved one."""
+class BoardConnectionUpdate(BaseModel):
+    """Omitted fields stay as they are. An empty secret keeps the saved one. The kind is fixed."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: Name | None = None
-    organization_url: Annotated[HttpsUrl, AfterValidator(lambda url: url.rstrip("/"))] | None = None
-    azure_project: Annotated[AzureProjectName, AfterValidator(str.strip)] | None = None
-    pat: Secret | None = None
+    url: BoardUrl | None = None
+    scope: BoardScope | None = None
+    secret: Secret | None = None
 
 
-class AzureConnectionResponse(BaseModel):
+class BoardConnectionResponse(BaseModel):
     id: uuid.UUID
     name: str
     organization_id: uuid.UUID | None = Field(
         default=None, description="Set when an organization owns the connection"
     )
-    organization_url: str
-    azure_project: str
+    kind: BoardKind
+    url: str
+    scope: str
     has_secret: bool
     last_test_at: datetime | None
     last_test_ok: bool | None
@@ -161,7 +169,9 @@ class AzureConnectionResponse(BaseModel):
     updated_at: datetime
 
 
-class AzureTestResult(BaseModel):
+class BoardTestResult(BaseModel):
     ok: bool
-    project_name: str | None = None
+    scope_name: str | None = Field(
+        default=None, description="The Azure project's or Planka board's name"
+    )
     error: str | None = None

@@ -159,9 +159,10 @@ class AzureBoardsClient:
             raise TrackerError("Unexpected answer from Azure DevOps.")
         return name
 
-    def existing_work_items(self, ids: Iterable[int]) -> set[int]:
-        wanted = sorted(set(ids))
-        found: set[int] = set()
+    def existing_work_items(self, ids: Iterable[str]) -> set[str]:
+        # Azure IDs are integers: anything else can't exist.
+        wanted = sorted({int(i) for i in ids if i.isascii() and i.isdigit()})
+        found: set[str] = set()
         url = f"{self._org_url}/{self._project_path}/_apis/wit/workitems"
         for start in range(0, len(wanted), EXISTENCE_BATCH):
             batch = wanted[start : start + EXISTENCE_BATCH]
@@ -183,13 +184,15 @@ class AzureBoardsClient:
                 ) from exc
             for item in body.get("value", []) if isinstance(body, dict) else []:
                 if isinstance(item, dict) and isinstance(item.get("id"), int):
-                    found.add(item["id"])
+                    found.add(str(item["id"]))
         return found
 
-    def _comments_url(self, work_item_id: int) -> str:
+    def _comments_url(self, work_item_id: str) -> str:
+        if not (work_item_id.isascii() and work_item_id.isdigit()):
+            raise TrackerNotFoundError("Not found.")
         return f"{self._org_url}/{self._project_path}/_apis/wit/workItems/{work_item_id}/comments"
 
-    def add_comment(self, work_item_id: int, text: str) -> int:
+    def add_comment(self, work_item_id: str, text: str) -> str:
         body = self._json(
             "POST",
             self._comments_url(work_item_id),
@@ -199,16 +202,18 @@ class AzureBoardsClient:
         comment_id = body.get("id") if isinstance(body, dict) else None
         if not isinstance(comment_id, int):
             raise TrackerError("Azure DevOps did not return the new comment's ID.")
-        return comment_id
+        return str(comment_id)
 
-    def list_comments(self, work_item_id: int) -> list[TrackerComment]:
+    def list_comments(self, work_item_id: str) -> list[TrackerComment]:
         comments: list[TrackerComment] = []
         params: dict[str, str] = {"api-version": COMMENTS_API_VERSION, "$top": "200"}
         while True:
             body = self._json("GET", self._comments_url(work_item_id), params=params)
             for comment in body.get("comments", []) if isinstance(body, dict) else []:
                 if isinstance(comment, dict) and isinstance(comment.get("id"), int):
-                    comments.append(TrackerComment(comment["id"], str(comment.get("text") or "")))
+                    comments.append(
+                        TrackerComment(str(comment["id"]), str(comment.get("text") or ""))
+                    )
             token = body.get("continuationToken") if isinstance(body, dict) else None
             if not token:
                 return comments
@@ -262,7 +267,7 @@ class AzureBoardsClient:
             fields: dict[str, Any] = raw if isinstance(raw, dict) else {}
             state = str(fields.get("System.State") or "")
             by_id[item["id"]] = TrackerWorkItem(
-                id=item["id"],
+                id=str(item["id"]),
                 title=str(fields.get("System.Title") or ""),
                 type=str(fields.get("System.WorkItemType") or ""),
                 state=state,

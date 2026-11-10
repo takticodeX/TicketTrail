@@ -1,4 +1,4 @@
-"""URL rules for repository and Azure URLs, and the SSRF guard (spec section 10)."""
+"""URL rules for repository and board URLs, and the SSRF guard (spec section 10)."""
 
 import ipaddress
 import socket

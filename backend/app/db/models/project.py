@@ -9,7 +9,7 @@ from app.db.base import OwnedModel, ownership_constraints
 
 
 class Project(OwnedModel):
-    """One Git connection paired with one Azure DevOps board."""
+    """One Git connection paired with one board (Azure DevOps or Planka)."""
 
     __tablename__ = "projects"
     __table_args__ = ownership_constraints("projects")
@@ -18,8 +18,8 @@ class Project(OwnedModel):
     git_connection_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("git_connections.id", ondelete="RESTRICT"), index=True
     )
-    azure_connection_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("azure_connections.id", ondelete="RESTRICT"), index=True
+    board_connection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("board_connections.id", ondelete="RESTRICT"), index=True
     )
     # Empty means "the remote's default branch only".
     branches: Mapped[list[str]] = mapped_column(

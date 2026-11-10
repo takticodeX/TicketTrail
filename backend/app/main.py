@@ -45,7 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.redis = redis
     app.state.secret_box = SecretBox.from_settings(settings)
     app.state.login_limiter = LoginRateLimiter(redis)
-    # The API never runs Git or Azure calls itself; the worker does (spec section 3).
+    # The API never runs Git or board calls itself; the worker does (spec section 3).
     app.state.task_runner = CeleryTaskRunner(create_celery_app(settings))
 
     register_exception_handlers(app)

@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.api.v1.schemas.common import OrganizationSummary, UserSummary
-from app.api.v1.schemas.connections import AzureConnectionResponse, GitConnectionResponse
+from app.api.v1.schemas.connections import BoardConnectionResponse, GitConnectionResponse
 from app.api.v1.schemas.runs import RunResponse
 
 ShareRoleName = Literal["viewer", "editor"]
@@ -90,7 +90,7 @@ class AdminGitConnectionResponse(GitConnectionResponse, AdminConnectionOwner):
     pass
 
 
-class AdminAzureConnectionResponse(AzureConnectionResponse, AdminConnectionOwner):
+class AdminBoardConnectionResponse(BoardConnectionResponse, AdminConnectionOwner):
     pass
 
 
@@ -104,7 +104,7 @@ class AuditEventResponse(BaseModel):
     actor_id: uuid.UUID | None
     actor_email: str
     action: str = Field(description='A verb such as "update", "delete", "sync" or "share"')
-    resource_type: Literal["project", "run", "git_connection", "azure_connection", "organization"]
+    resource_type: Literal["project", "run", "git_connection", "board_connection", "organization"]
     resource_id: uuid.UUID | None
     resource_name: str
     owner_label: str = Field(description="Whose it is: an email, or an organization")

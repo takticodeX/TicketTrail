@@ -17,19 +17,19 @@ class ReviewRepository:
         self.session = session
         self.project_id = project_id
 
-    def links(self, shas: list[str] | None = None) -> dict[str, list[int]]:
+    def links(self, shas: list[str] | None = None) -> dict[str, list[str]]:
         """Work items linked by hand, per commit, in the order they were linked."""
         query = select(CommitLink.commit_sha, CommitLink.work_item_id).where(
             CommitLink.project_id == self.project_id
         )
         if shas is not None:
             query = query.where(CommitLink.commit_sha.in_(shas))
-        result: dict[str, list[int]] = defaultdict(list)
+        result: dict[str, list[str]] = defaultdict(list)
         for sha, work_item_id in self.session.execute(query.order_by(CommitLink.created_at)):
             result[sha].append(work_item_id)
         return dict(result)
 
-    def exclusions(self, shas: list[str] | None = None) -> set[tuple[str, int]]:
+    def exclusions(self, shas: list[str] | None = None) -> set[tuple[str, str]]:
         query = select(CommitExclusion.commit_sha, CommitExclusion.work_item_id).where(
             CommitExclusion.project_id == self.project_id
         )
@@ -41,7 +41,7 @@ class ReviewRepository:
         self,
         model: type[CommitLink] | type[CommitExclusion],
         sha: str,
-        work_item_id: int,
+        work_item_id: str,
         by: uuid.UUID,
     ) -> None:
         statement = insert(model).values(
@@ -53,10 +53,10 @@ class ReviewRepository:
         )
         self.session.execute(statement.on_conflict_do_nothing())
 
-    def link(self, sha: str, work_item_id: int, by: uuid.UUID) -> None:
+    def link(self, sha: str, work_item_id: str, by: uuid.UUID) -> None:
         self._add(CommitLink, sha, work_item_id, by)
 
-    def unlink(self, sha: str, work_item_id: int) -> None:
+    def unlink(self, sha: str, work_item_id: str) -> None:
         self.session.execute(
             delete(CommitLink).where(
                 CommitLink.project_id == self.project_id,
@@ -65,10 +65,10 @@ class ReviewRepository:
             )
         )
 
-    def exclude(self, sha: str, work_item_id: int, by: uuid.UUID) -> None:
+    def exclude(self, sha: str, work_item_id: str, by: uuid.UUID) -> None:
         self._add(CommitExclusion, sha, work_item_id, by)
 
-    def include(self, sha: str, work_item_id: int) -> None:
+    def include(self, sha: str, work_item_id: str) -> None:
         self.session.execute(
             delete(CommitExclusion).where(
                 CommitExclusion.project_id == self.project_id,

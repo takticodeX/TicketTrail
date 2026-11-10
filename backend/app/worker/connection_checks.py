@@ -1,4 +1,4 @@
-"""Connection tests run by the worker: `git ls-remote` and the Azure project lookup.
+"""Connection tests run by the worker: `git ls-remote` and the board lookup.
 
 Each loads the connection by ID and owner, decrypts its secret in memory only,
 records last_test_at / last_test_ok, and returns a result safe to show the user.
@@ -8,10 +8,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from app.api.v1.schemas import AzureTestResult, GitTestResult
+from app.api.v1.schemas import BoardTestResult, GitTestResult
 from app.core.crypto import SecretDecryptionError
 from app.core.urls import UnsafeUrlError, check_public_host
-from app.db.models import AzureConnection, GitAuthType, GitConnection
+from app.db.models import BoardConnection, GitAuthType, GitConnection
 from app.integrations.git.client import (
     GitAuthError,
     GitClient,
@@ -19,16 +19,13 @@ from app.integrations.git.client import (
     GitError,
     GitNotFoundError,
 )
-from app.integrations.trackers.azure import AzureBoardsClient
 from app.integrations.trackers.base import TrackerError
+from app.worker.boards import UNDECRYPTABLE, BoardUnavailableError, open_board
 from app.worker.context import WorkerContext
 
 # A test should answer quickly even when TT_GIT_TIMEOUT allows long syncs.
 TEST_TIMEOUT_SECONDS = 20.0
 
-UNDECRYPTABLE = (
-    "The saved secret can't be decrypted (was TT_ENCRYPTION_KEY changed?). Enter it again."
-)
 GIT_AUTH_FAILED = (
     "Authentication failed. Check the username and token; the token needs read access "
     "to the repository's code (for example Code: Read)."
@@ -62,25 +59,15 @@ def _git_test(context: WorkerContext, connection: GitConnection) -> GitTestResul
     return GitTestResult(ok=True, branches=info.branches, default_branch=info.default_branch)
 
 
-def _azure_test(context: WorkerContext, connection: AzureConnection) -> AzureTestResult:
+def _board_test(context: WorkerContext, connection: BoardConnection) -> BoardTestResult:
     try:
-        check_public_host(
-            connection.organization_url, allow_private=context.settings.allow_private_hosts
-        )
-    except UnsafeUrlError as exc:
-        return AzureTestResult(ok=False, error=f"Organization URL refused: {exc}.")
-    try:
-        pat = context.secret_box.decrypt(connection.pat_enc)
-    except SecretDecryptionError:
-        return AzureTestResult(ok=False, error=UNDECRYPTABLE)
-    try:
-        with AzureBoardsClient(
-            connection.organization_url, connection.azure_project, pat, timeout=TEST_TIMEOUT_SECONDS
-        ) as client:
-            project_name = client.test_connection()
+        with open_board(context, connection, timeout=TEST_TIMEOUT_SECONDS, limited=False) as client:
+            name = client.test_connection()
+    except BoardUnavailableError as exc:
+        return BoardTestResult(ok=False, error=str(exc))
     except TrackerError as exc:
-        return AzureTestResult(ok=False, error=str(exc))
-    return AzureTestResult(ok=True, project_name=project_name)
+        return BoardTestResult(ok=False, error=str(exc))
+    return BoardTestResult(ok=True, scope_name=name)
 
 
 def run_git_connection_check(context: WorkerContext, connection_id: uuid.UUID) -> dict[str, Any]:
@@ -96,13 +83,13 @@ def run_git_connection_check(context: WorkerContext, connection_id: uuid.UUID) -
     return result.model_dump(mode="json")
 
 
-def run_azure_connection_check(context: WorkerContext, connection_id: uuid.UUID) -> dict[str, Any]:
+def run_board_connection_check(context: WorkerContext, connection_id: uuid.UUID) -> dict[str, Any]:
     """The API has already checked that the caller may test this connection."""
     with context.session_factory() as db:
-        connection = db.get(AzureConnection, connection_id)
+        connection = db.get(BoardConnection, connection_id)
         if connection is None:
-            return AzureTestResult(ok=False, error="Connection not found.").model_dump(mode="json")
-        result = _azure_test(context, connection)
+            return BoardTestResult(ok=False, error="Connection not found.").model_dump(mode="json")
+        result = _board_test(context, connection)
         connection.last_test_at = datetime.now(UTC)
         connection.last_test_ok = result.ok
         db.commit()

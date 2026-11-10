@@ -47,15 +47,15 @@ test('register, connect, dry run, sync and see the history', async ({ page }) =>
   await expect(page.getByText(/Found 1 branch/)).toBeVisible();
   await page.getByRole('button', { name: 'Close' }).click();
 
-  // Azure connection.
-  await page.goto('/settings/azure');
-  await page.getByRole('button', { name: 'Add Azure connection' }).click();
+  // Board connection (Azure DevOps).
+  await page.goto('/settings/boards');
+  await page.getByRole('button', { name: 'Add board connection' }).click();
   await page.getByLabel('Name', { exact: true }).fill('Web board');
   await page.getByLabel('Organization URL', { exact: true }).fill(ORG_URL);
   await page.getByLabel('Project', { exact: true }).fill('Web');
   await page.getByLabel('Personal access token', { exact: true }).fill(AZURE_PAT);
   await page.getByRole('button', { name: 'Save and test' }).click();
-  await expect(page.getByText('Found the project')).toBeVisible();
+  await expect(page.getByText('Connection works')).toBeVisible();
   await page.getByRole('button', { name: 'Close' }).click();
 
   // Project, through the wizard.
@@ -68,7 +68,7 @@ test('register, connect, dry run, sync and see the history', async ({ page }) =>
   await page.getByRole('textbox', { name: 'Branches to sync' }).fill('main');
   await page.keyboard.press('Enter');
   await page.getByRole('button', { name: 'Next' }).click();
-  await pick(page, 'Azure connection', 'Web board (Web)');
+  await pick(page, 'Board connection', 'Web board (Web)');
   for (let step = 0; step < 4; step += 1) await page.getByRole('button', { name: 'Next' }).click();
   await page.getByRole('button', { name: 'Create project' }).click();
   await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();

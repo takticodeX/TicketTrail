@@ -31,7 +31,7 @@ import { TemplateEditor } from '../../components/settings/TemplateEditor';
 import { useAuth } from '../../hooks/useAuth';
 import { useOrganizations } from '../../hooks/useOrganizations';
 import {
-  useAzureConnections,
+  useBoardConnections,
   useGitConnections,
   useProject,
   useSaveProject,
@@ -43,7 +43,7 @@ import { FIELD_STEP, sampleCommit, toFormValues, toProjectInput } from './projec
 const STEPS: { label: string; fields: FieldPath<ProjectValues>[] }[] = [
   { label: 'Repository', fields: ['name', 'git_connection_id'] },
   { label: 'Branches', fields: ['branches'] },
-  { label: 'Board', fields: ['azure_connection_id'] },
+  { label: 'Board', fields: ['board_connection_id'] },
   { label: 'Ticket pattern', fields: ['ticket_pattern'] },
   { label: 'Comment', fields: ['comment_template'] },
   { label: 'Start point', fields: ['start_mode', 'start_date', 'start_sha'] },
@@ -108,7 +108,7 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
   // An administrator editing someone else's personal project picks among that user's connections.
   const connectionOwnerId = project?.owner && project.owner.id !== user?.id ? project.owner.id : null;
   const gitConnections = useGitConnections(organizationId, connectionOwnerId);
-  const azureConnections = useAzureConnections(organizationId, connectionOwnerId);
+  const boardConnections = useBoardConnections(organizationId, connectionOwnerId);
   const save = useSaveProject();
   const loadBranches = useTestGitConnection();
 
@@ -178,9 +178,9 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
 
   // An editor can't list the owner's connections: offer only the project's own.
   const gitChoices = ownsConnections ? (gitConnections.data?.items ?? []) : [project?.git_connection];
-  const azureChoices = ownsConnections ? (azureConnections.data?.items ?? []) : [project?.azure_connection];
+  const boardChoices = ownsConnections ? (boardConnections.data?.items ?? []) : [project?.board_connection];
   const gitOptions = gitChoices.flatMap((c) => (c ? [{ value: c.id, label: c.name }] : []));
-  const azureOptions = azureChoices.flatMap((c) => (c ? [{ value: c.id, label: `${c.name} (${c.azure_project})` }] : []));
+  const boardOptions = boardChoices.flatMap((c) => (c ? [{ value: c.id, label: `${c.name} (${c.scope})` }] : []));
   const lockedHint = ownsConnections ? undefined : `Only ${ownerName} can change the connection.`;
   const ownerOptions = [
     { value: '', label: 'Me (a personal project)' },
@@ -191,7 +191,7 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
     setOrganizationId(value || null);
     // The other owner's connections can't be used.
     setValue('git_connection_id', '');
-    setValue('azure_connection_id', '');
+    setValue('board_connection_id', '');
     setBranchResult(null);
   };
   const isLast = active === STEPS.length - 1;
@@ -308,25 +308,25 @@ function ProjectWizard({ project }: { project: Project | undefined }) {
                 <Stack pt="md">
                   <Controller
                     control={control}
-                    name="azure_connection_id"
+                    name="board_connection_id"
                     render={({ field }) => (
                       <Select
-                        label="Azure connection"
+                        label="Board connection"
                         placeholder="Pick a board"
                         disabled={!ownsConnections}
                         description={lockedHint}
-                        data={azureOptions}
+                        data={boardOptions}
                         value={field.value || null}
                         onChange={(value) => field.onChange(value ?? '')}
-                        error={errors.azure_connection_id?.message}
-                        nothingFoundMessage="No Azure connections"
+                        error={errors.board_connection_id?.message}
+                        nothingFoundMessage="No board connections"
                       />
                     )}
                   />
-                  {ownsConnections && azureConnections.data?.items.length === 0 && (
+                  {ownsConnections && boardConnections.data?.items.length === 0 && (
                     <Text size="sm">
-                      No Azure connections yet.{' '}
-                      <Anchor component={Link} to={connectionsPage ?? '/settings/azure'}>
+                      No board connections yet.{' '}
+                      <Anchor component={Link} to={connectionsPage ?? '/settings/boards'}>
                         Add one first
                       </Anchor>
                       .

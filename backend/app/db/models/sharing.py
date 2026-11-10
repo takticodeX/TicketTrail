@@ -85,7 +85,7 @@ class AuditEvent(TimestampedModel):
     actor_email: Mapped[str] = mapped_column(String(320))
     # A verb such as "update", "delete", "sync" or "share".
     action: Mapped[str] = mapped_column(String(64))
-    # "project", "run", "git_connection", "azure_connection" or "organization".
+    # "project", "run", "git_connection", "board_connection" or "organization".
     resource_type: Mapped[str] = mapped_column(String(32))
     resource_id: Mapped[uuid.UUID | None]
     resource_name: Mapped[str] = mapped_column(String(200))

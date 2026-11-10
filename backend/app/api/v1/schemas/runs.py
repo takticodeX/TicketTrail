@@ -63,7 +63,7 @@ class RunItemResponse(BaseModel):
     commit_sha: str
     commit_subject: str
     branch: str
-    work_item_id: int | None
+    work_item_id: str | None
     action: ItemAction
     detail: str | None
     manual: bool = Field(default=False, description="The work item was linked by hand")

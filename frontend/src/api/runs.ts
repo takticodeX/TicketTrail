@@ -40,7 +40,7 @@ export const searchWorkItems = (projectId: string, query: string, signal?: Abort
   );
 
 /** Post a dry-run row to this work item; the commit stays linked to it from now on. */
-export const setItemWorkItem = (runId: string, itemId: string, workItemId: number) =>
+export const setItemWorkItem = (runId: string, itemId: string, workItemId: string) =>
   apiRequest<SyncRunItem>(`/runs/${runId}/items/${itemId}/work-item`, {
     method: 'PUT',
     body: { work_item_id: workItemId },

@@ -37,7 +37,7 @@ const project: Project = {
   id: 'p1',
   name: 'Shop',
   git_connection_id: 'g1',
-  azure_connection_id: 'a1',
+  board_connection_id: 'a1',
   branches: [],
   ticket_pattern: 'AB#(\\d+)',
   comment_template: '{subject} tt:{sha}',
@@ -79,7 +79,7 @@ describe('OrganizationsPage', () => {
       'GET /api/v1/organizations/o2': () => jsonResponse({ ...acme, id: 'o2', name: 'Beta' }),
       'GET /api/v1/organizations/o2/members': () => jsonResponse(members),
       'GET /api/v1/git-connections?page_size=100&organization_id=o2': () => page([]),
-      'GET /api/v1/azure-connections?page_size=100&organization_id=o2': () => page([]),
+      'GET /api/v1/board-connections?page_size=100&organization_id=o2': () => page([]),
       'GET /api/v1/projects?page_size=100': () => page([]),
     });
     renderAt('/settings/organizations');
@@ -107,7 +107,7 @@ describe('OrganizationPage', () => {
         page([
           { id: 'g1', name: 'Acme repo', repo_url: 'https://github.com/acme/shop', last_test_ok: true, last_test_at: '2026-10-20T10:00:00Z' },
         ]),
-      'GET /api/v1/azure-connections?page_size=100&organization_id=o1': () => page([]),
+      'GET /api/v1/board-connections?page_size=100&organization_id=o1': () => page([]),
       'GET /api/v1/projects?page_size=100': () => page([project]),
       ...extra,
     });
@@ -215,7 +215,7 @@ describe('organization projects', () => {
       'GET /api/v1/organizations': () => jsonResponse([acme]),
       'GET /api/v1/git-connections?page_size=100&organization_id=o1': () =>
         page([{ id: 'g9', name: 'Acme repo', repo_url: 'https://github.com/acme/shop', commit_url_pattern: '' }]),
-      'GET /api/v1/azure-connections?page_size=100&organization_id=o1': () => page([]),
+      'GET /api/v1/board-connections?page_size=100&organization_id=o1': () => page([]),
     });
     renderAt('/settings/projects/new?organization=o1');
     expect(await screen.findByRole('textbox', { name: 'Owner' })).toHaveValue('Acme');

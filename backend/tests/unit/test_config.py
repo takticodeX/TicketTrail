@@ -14,7 +14,7 @@ def test_defaults_match_spec(make_settings: Callable[..., Settings]) -> None:
     assert settings.allow_private_hosts is False
     assert settings.git_timeout == 300
     assert settings.min_schedule_minutes == 5
-    assert settings.azure_max_concurrency == 5
+    assert settings.board_max_concurrency == 5
     assert settings.log_level == "INFO"
     assert settings.public_url == "http://localhost:8080"
 
@@ -69,3 +69,13 @@ def test_secrets_are_not_shown_in_repr(make_settings: Callable[..., Settings]) -
     settings = make_settings()
     assert settings.jwt_secret.get_secret_value() not in repr(settings)
     assert settings.encryption_key.get_secret_value() not in repr(settings)
+
+
+@pytest.mark.parametrize("name", ["TT_BOARD_MAX_CONCURRENCY", "TT_AZURE_MAX_CONCURRENCY"])
+def test_board_concurrency_reads_the_new_and_the_old_name(
+    name: str, monkeypatch: pytest.MonkeyPatch, make_settings: Callable[..., Settings]
+) -> None:
+    monkeypatch.setenv("TT_ENCRYPTION_KEY", make_settings().encryption_key.get_secret_value())
+    monkeypatch.setenv("TT_JWT_SECRET", "y" * 40)
+    monkeypatch.setenv(name, "3")
+    assert Settings().board_max_concurrency == 3  # type: ignore[call-arg]

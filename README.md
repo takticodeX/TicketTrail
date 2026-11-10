@@ -127,7 +127,7 @@ creates the GitHub Release. The first time, make the two packages public in GitH
 
 1. **Create an account.** The first account registered becomes the **administrator**.
    To stop strangers from signing up afterwards, set `TT_ALLOW_REGISTRATION=false`.
-2. **Settings → Azure connections → Add.** Enter the organization URL
+2. **Settings → Board connections → Add.** For Azure DevOps, enter the organization URL
    (`https://dev.azure.com/<organization>`), the project name and a personal access token
    (see [section 3](#3-access-tokens-minimum-scopes-per-host)). Click **Save and test**.
 3. **Settings → Git connections → Add.** Paste the repository's HTTPS clone URL. The
@@ -189,7 +189,7 @@ have one of three roles, and the role alone decides what you can do:
 | Sync now; review a dry run (untick, pick work items) and **Post selected** | | ✓ | ✓ |
 | Cancel and delete any run, clear dry runs | | ✓ | ✓ |
 | Change the settings (branches, pattern, template, start point, schedule) | | ✓ | ✓ |
-| Change the Git or Azure connection, share, **Change owner**, delete the project | | | ✓ |
+| Change the Git or board connection, share, **Change owner**, delete the project | | | ✓ |
 
 Connections follow their owner too: your own connections are yours alone; an
 organization's are used by its members and changed by its admins. Saved tokens are never
@@ -244,7 +244,7 @@ An administrator is the owner of every project and an admin of every organizatio
 
 - **Admin → Projects** lists every project with its owner; open one to work on it (a
   banner reminds you it isn't yours) or change its owner.
-- **Admin → Connections** lists every Git and Azure connection with its owner and how many
+- **Admin → Connections** lists every Git and board connection with its owner and how many
   projects use it, to test, change or delete. Tokens can be replaced, never read.
 - **Admin → Organizations** lists every organization; open one to manage it, or **Make
   admin** a member of an organization left without one.
@@ -289,10 +289,10 @@ All settings are environment variables in `.env` (see `.env.example`).
 | `TT_PUBLIC_URL` | `http://localhost:8080` | The address users open; cookies are marked Secure when it starts with `https://` |
 | `TT_HTTP_PORT` | `8080` | Host port the web app is published on |
 | `TT_ALLOW_REGISTRATION` | `true` | Whether anyone can create an account |
-| `TT_ALLOW_PRIVATE_HOSTS` | `false` | Allow Git or Azure servers on private networks (see below) |
+| `TT_ALLOW_PRIVATE_HOSTS` | `false` | Allow Git or board servers on private networks (see below) |
 | `TT_GIT_TIMEOUT` | `300` | Seconds a single Git command may take |
 | `TT_MIN_SCHEDULE_MINUTES` | `5` | Shortest allowed schedule interval |
-| `TT_AZURE_MAX_CONCURRENCY` | `5` | Concurrent requests per Azure organization, across all workers |
+| `TT_BOARD_MAX_CONCURRENCY` | `5` | Concurrent requests per board server (Azure organization), across all workers. The old name `TT_AZURE_MAX_CONCURRENCY` still works |
 | `TT_LOG_LEVEL` | `INFO` | Log level; logs are JSON and secrets are masked |
 | `TT_DB_PASSWORD` | `tt` | Password of the bundled database; **change it** before the first start ([section 1](#first-start-change-the-defaults)) |
 | `TT_DATABASE_URL` | built from `TT_DB_PASSWORD` | Set only to use an external database |
@@ -417,7 +417,7 @@ To rotate `TT_JWT_SECRET`, change it and restart: everyone has to log in again.
 | --- | --- |
 | "Authentication failed" on a Git connection | The username for your host (table in [section 3](#3-access-tokens-minimum-scopes-per-host)) and that the token can read the repository |
 | "PAT invalid, expired or missing scope" | The Azure PAT's expiry date and its **Work Items: Read & Write** scope; it must belong to the same organization |
-| "Project … was not found in this organization" | The organization URL and the project name in the Azure connection |
+| "Project … was not found in this organization" | The organization URL and the project name in the board connection |
 | "…resolves to a private address" | The server is on a private network: see `TT_ALLOW_PRIVATE_HOSTS` in [section 4](#4-configuration) |
 | A run stays "Queued" | `docker compose ps`: is the `worker` healthy? `docker compose logs worker` |
 | A run was "Skipped" | Another run of the same project was in progress; only one runs at a time |

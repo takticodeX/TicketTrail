@@ -39,7 +39,7 @@ export function ProjectsPage() {
   return (
     <SettingsList
       title="Projects"
-      description="Each project pairs one Git repository with one Azure DevOps board."
+      description="Each project pairs one Git repository with one board."
       query={query}
       addLabel="New project"
       onAdd={() => navigate('/settings/projects/new')}
@@ -81,7 +81,7 @@ export function ProjectsPage() {
               {project.branches.length > 0 ? project.branches.join(', ') : 'Default branch'}
             </Text>
           </Table.Td>
-          <Table.Td>{project.azure_connection?.name ?? '…'}</Table.Td>
+          <Table.Td>{project.board_connection?.name ?? '…'}</Table.Td>
           <Table.Td>
             <Text size="sm">{scheduleLabel(project)}</Text>
           </Table.Td>

@@ -5,41 +5,41 @@ import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { applyServerErrors, errorMessage } from '../../api/errors';
-import type { AzureConnection, AzureConnectionInput, AzureTestResult } from '../../api/types';
-import { useSaveAzureConnection, useTestAzureConnection } from '../../hooks/useSettings';
-import { azureConnectionSchema, type AzureConnectionValues } from '../../schemas/settings';
+import type { BoardConnection, BoardConnectionInput, BoardTestResult } from '../../api/types';
+import { useSaveBoardConnection, useTestBoardConnection } from '../../hooks/useSettings';
+import { boardConnectionSchema, type BoardConnectionValues } from '../../schemas/settings';
 import { SecretInput } from '../SecretInput';
-import { AzureTestResultView } from './ConnectionTestResult';
+import { BoardTestResultView } from './ConnectionTestResult';
 
 const FIELDS = {
   name: 'name',
-  organization_url: 'organization_url',
-  azure_project: 'azure_project',
-  pat: 'pat',
+  url: 'url',
+  scope: 'scope',
+  secret: 'secret',
 } as const;
 
-function toInput(values: AzureConnectionValues): AzureConnectionInput {
+function toInput(values: BoardConnectionValues): BoardConnectionInput {
   return {
     name: values.name,
-    organization_url: values.organization_url,
-    azure_project: values.azure_project,
-    ...(values.pat ? { pat: values.pat } : {}),
+    url: values.url,
+    scope: values.scope,
+    ...(values.secret ? { secret: values.secret } : {}),
   };
 }
 
 interface Props {
-  connection: AzureConnection | null;
-  onSaved: (connection: AzureConnection) => void;
+  connection: BoardConnection | null;
+  onSaved: (connection: BoardConnection) => void;
   onClose: () => void;
   /** A new connection is created for this organization instead of for the user. */
   organizationId?: string;
 }
 
-export function AzureConnectionForm({ connection, onSaved, onClose, organizationId }: Props) {
-  const save = useSaveAzureConnection();
-  const test = useTestAzureConnection();
+export function BoardConnectionForm({ connection, onSaved, onClose, organizationId }: Props) {
+  const save = useSaveBoardConnection();
+  const test = useTestBoardConnection();
   const [formError, setFormError] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<AzureTestResult | null>(null);
+  const [testResult, setTestResult] = useState<BoardTestResult | null>(null);
   const hasSavedSecret = useRef(Boolean(connection?.has_secret));
   hasSavedSecret.current = Boolean(connection?.has_secret);
 
@@ -49,19 +49,19 @@ export function AzureConnectionForm({ connection, onSaved, onClose, organization
     setError,
     reset,
     formState: { errors, isDirty, isSubmitting },
-  } = useForm<AzureConnectionValues>({
-    // Read at validation time: after the first save a PAT is stored, so it may stay empty.
+  } = useForm<BoardConnectionValues>({
+    // Read at validation time: after the first save a token is stored, so it may stay empty.
     resolver: (values, context, options) =>
-      zodResolver(azureConnectionSchema({ hasSavedSecret: hasSavedSecret.current }))(
+      zodResolver(boardConnectionSchema({ hasSavedSecret: hasSavedSecret.current }))(
         values,
         context,
         options,
       ),
     defaultValues: {
       name: connection?.name ?? '',
-      organization_url: connection?.organization_url ?? '',
-      azure_project: connection?.azure_project ?? '',
-      pat: '',
+      url: connection?.url ?? '',
+      scope: connection?.scope ?? '',
+      secret: '',
     },
   });
 
@@ -70,7 +70,7 @@ export function AzureConnectionForm({ connection, onSaved, onClose, organization
     try {
       setTestResult(await test.mutateAsync(id));
     } catch (error) {
-      setTestResult({ ok: false, project_name: null, error: errorMessage(error) });
+      setTestResult({ ok: false, scope_name: null, error: errorMessage(error) });
     }
   };
 
@@ -78,15 +78,17 @@ export function AzureConnectionForm({ connection, onSaved, onClose, organization
     handleSubmit(async (values) => {
       setFormError(null);
       setTestResult(null);
-      let saved: AzureConnection;
+      let saved: BoardConnection;
       try {
-        const body = connection ? toInput(values) : { ...toInput(values), organization_id: organizationId };
+        const body = connection
+          ? toInput(values)
+          : { ...toInput(values), kind: 'azure' as const, organization_id: organizationId };
         saved = await save.mutateAsync({ id: connection?.id, body });
       } catch (error) {
         setFormError(applyServerErrors(error, setError, FIELDS));
         return;
       }
-      reset({ ...values, pat: '' });
+      reset({ ...values, secret: '' });
       onSaved(saved);
       if (andTest) await runTest(saved.id);
       else notifications.show({ color: 'teal', message: `Saved "${saved.name}".` });
@@ -106,24 +108,24 @@ export function AzureConnectionForm({ connection, onSaved, onClose, organization
         <TextInput
           label="Organization URL"
           placeholder="https://dev.azure.com/acme"
-          error={errors.organization_url?.message}
-          {...register('organization_url')}
+          error={errors.url?.message}
+          {...register('url')}
         />
         <TextInput
           label="Project"
           description="The Azure DevOps project whose work items get the comments."
-          error={errors.azure_project?.message}
-          {...register('azure_project')}
+          error={errors.scope?.message}
+          {...register('scope')}
         />
         <SecretInput
           label="Personal access token"
           saved={Boolean(connection?.has_secret)}
           description="Needs the Work Items (Read & Write) scope, and nothing more."
-          error={errors.pat?.message}
-          {...register('pat')}
+          error={errors.secret?.message}
+          {...register('secret')}
         />
 
-        {testResult && <AzureTestResultView result={testResult} />}
+        {testResult && <BoardTestResultView result={testResult} />}
 
         <Group justify="space-between">
           <Button

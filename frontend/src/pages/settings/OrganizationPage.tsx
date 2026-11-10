@@ -21,9 +21,9 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { deleteErrorMessage, errorMessage, firstFieldMessage } from '../../api/errors';
-import type { AzureConnection, GitConnection, Organization, OrganizationMember, OrganizationRole } from '../../api/types';
+import type { BoardConnection, GitConnection, Organization, OrganizationMember, OrganizationRole } from '../../api/types';
 import { confirmDelete } from '../../components/confirmDelete';
-import { AzureConnectionForm } from '../../components/settings/AzureConnectionForm';
+import { BoardConnectionForm } from '../../components/settings/BoardConnectionForm';
 import { GitConnectionForm } from '../../components/settings/GitConnectionForm';
 import { TestStatus } from '../../components/TestStatus';
 import { useAuth } from '../../hooks/useAuth';
@@ -37,12 +37,13 @@ import {
   useUpdateOrganization,
 } from '../../hooks/useOrganizations';
 import {
-  useAzureConnections,
-  useDeleteAzureConnection,
+  useBoardConnections,
+  useDeleteBoardConnection,
   useDeleteGitConnection,
   useGitConnections,
   useProjects,
 } from '../../hooks/useSettings';
+import { BOARD_LABELS, boardDetail } from '../../lib/boards';
 import { timeZones } from '../../lib/schedule';
 
 const ROLE_OPTIONS = [
@@ -236,19 +237,19 @@ type Editing<T> = T | 'new' | null;
 
 function Connections({ org, isAdmin }: { org: Organization; isAdmin: boolean }) {
   const git = useGitConnections(org.id);
-  const azure = useAzureConnections(org.id);
+  const boards = useBoardConnections(org.id);
   const removeGit = useDeleteGitConnection();
-  const removeAzure = useDeleteAzureConnection();
+  const removeBoard = useDeleteBoardConnection();
   const [gitEditing, setGitEditing] = useState<Editing<GitConnection>>(null);
-  const [azureEditing, setAzureEditing] = useState<Editing<AzureConnection>>(null);
+  const [boardEditing, setBoardEditing] = useState<Editing<BoardConnection>>(null);
   // A new key each time a drawer opens; saving keeps the same form (and its test result).
   const [formKey, setFormKey] = useState(0);
   const openGit = (target: GitConnection | 'new') => {
     setGitEditing(target);
     setFormKey((key) => key + 1);
   };
-  const openAzure = (target: AzureConnection | 'new') => {
-    setAzureEditing(target);
+  const openBoard = (target: BoardConnection | 'new') => {
+    setBoardEditing(target);
     setFormKey((key) => key + 1);
   };
 
@@ -273,15 +274,15 @@ function Connections({ org, isAdmin }: { org: Organization; isAdmin: boolean }) 
       edit: () => openGit(c),
       remove: () => removeGit.mutateAsync(c.id),
     })),
-    ...(azure.data?.items ?? []).map((c) => ({
+    ...(boards.data?.items ?? []).map((c) => ({
       id: c.id,
-      kind: 'Azure',
+      kind: BOARD_LABELS[c.kind],
       name: c.name,
-      detail: `${c.organization_url} · ${c.azure_project}`,
+      detail: boardDetail(c),
       ok: c.last_test_ok,
       at: c.last_test_at,
-      edit: () => openAzure(c),
-      remove: () => removeAzure.mutateAsync(c.id),
+      edit: () => openBoard(c),
+      remove: () => removeBoard.mutateAsync(c.id),
     })),
   ];
 
@@ -294,8 +295,8 @@ function Connections({ org, isAdmin }: { org: Organization; isAdmin: boolean }) 
             <Button size="xs" variant="default" onClick={() => openGit('new')}>
               Add Git connection
             </Button>
-            <Button size="xs" variant="default" onClick={() => openAzure('new')}>
-              Add Azure connection
+            <Button size="xs" variant="default" onClick={() => openBoard('new')}>
+              Add board connection
             </Button>
           </Group>
         )}
@@ -365,19 +366,19 @@ function Connections({ org, isAdmin }: { org: Organization; isAdmin: boolean }) 
         )}
       </Drawer>
       <Drawer
-        opened={azureEditing !== null}
-        onClose={() => setAzureEditing(null)}
+        opened={boardEditing !== null}
+        onClose={() => setBoardEditing(null)}
         position="right"
         size="lg"
-        title={azureEditing === 'new' ? `New Azure connection for ${org.name}` : 'Edit Azure connection'}
+        title={boardEditing === 'new' ? `New board connection for ${org.name}` : 'Edit board connection'}
       >
-        {azureEditing !== null && (
-          <AzureConnectionForm
+        {boardEditing !== null && (
+          <BoardConnectionForm
             key={formKey}
-            connection={azureEditing === 'new' ? null : azureEditing}
+            connection={boardEditing === 'new' ? null : boardEditing}
             organizationId={org.id}
-            onSaved={setAzureEditing}
-            onClose={() => setAzureEditing(null)}
+            onSaved={setBoardEditing}
+            onClose={() => setBoardEditing(null)}
           />
         )}
       </Drawer>

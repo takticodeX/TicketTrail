@@ -7,7 +7,7 @@ import { sampleCommit, toFormValues, toProjectInput } from './projectForm';
 const input: ProjectInput = {
   name: 'App',
   git_connection_id: 'g1',
-  azure_connection_id: 'a1',
+  board_connection_id: 'a1',
   branches: ['main'],
   ticket_pattern: 'AB#(\\d+)',
   comment_template: '{subject} tt:{sha}',

@@ -48,7 +48,7 @@ export const OWN_PROJECT: Pick<
   | 'shares'
   | 'admin_access'
   | 'git_connection'
-  | 'azure_connection'
+  | 'board_connection'
 > = {
   role: 'owner',
   owner: { id: 'u1', display_name: 'Alice', email: 'alice@example.com' },
@@ -57,7 +57,7 @@ export const OWN_PROJECT: Pick<
   shares: 0,
   admin_access: false,
   git_connection: null,
-  azure_connection: null,
+  board_connection: null,
 };
 
 /** A full auth context value for tests that mock useAuth. */

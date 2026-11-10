@@ -86,17 +86,17 @@ def test_no_plaintext_secret_in_logs_or_database(
         )
         board = create(
             client,
-            "azure-connections",
+            "board-connections",
             headers,
             {
                 "name": "board",
-                "organization_url": "https://dev.azure.com/acme",
-                "azure_project": "proj",
-                "pat": AZURE_SECRET,
+                "url": "https://dev.azure.com/acme",
+                "scope": "proj",
+                "secret": AZURE_SECRET,
             },
         )
         client.post(f"/api/v1/git-connections/{git['id']}/test", headers=headers)
-        client.post(f"/api/v1/azure-connections/{board['id']}/test", headers=headers)
+        client.post(f"/api/v1/board-connections/{board['id']}/test", headers=headers)
 
         origin = FixtureRepo(tmp_path / "origin")
         origin.commit("Fix AB#1")
@@ -110,7 +110,7 @@ def test_no_plaintext_secret_in_logs_or_database(
             {
                 "name": "p",
                 "git_connection_id": git["id"],
-                "azure_connection_id": board["id"],
+                "board_connection_id": board["id"],
             },
         )
         azure.work_items.update({1, 2})

@@ -2,7 +2,7 @@
 
 PING = "tickettrail.ping"
 TEST_GIT_CONNECTION = "tickettrail.test_git_connection"
-TEST_AZURE_CONNECTION = "tickettrail.test_azure_connection"
+TEST_BOARD_CONNECTION = "tickettrail.test_board_connection"
 SYNC_PROJECT = "tickettrail.sync_project"
 DISPATCH_SCHEDULES = "tickettrail.dispatch_schedules"
 SEARCH_WORK_ITEMS = "tickettrail.search_work_items"

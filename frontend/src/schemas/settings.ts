@@ -74,17 +74,17 @@ export function gitConnectionSchema({ hasSavedSecret }: { hasSavedSecret: boolea
 }
 export type GitConnectionValues = z.infer<ReturnType<typeof gitConnectionSchema>>;
 
-export function azureConnectionSchema({ hasSavedSecret }: { hasSavedSecret: boolean }) {
+export function boardConnectionSchema({ hasSavedSecret }: { hasSavedSecret: boolean }) {
   return z.object({
     name,
-    organization_url: httpsUrl,
-    azure_project: z.string().trim().min(1, 'Project is required').max(255),
-    pat: hasSavedSecret
+    url: httpsUrl,
+    scope: z.string().trim().min(1, 'Project is required').max(255),
+    secret: hasSavedSecret
       ? z.string().max(4096)
       : z.string().min(1, 'Personal access token is required').max(4096),
   });
 }
-export type AzureConnectionValues = z.infer<ReturnType<typeof azureConnectionSchema>>;
+export type BoardConnectionValues = z.infer<ReturnType<typeof boardConnectionSchema>>;
 
 // Mirrors the branch rule in backend/app/api/v1/schemas/projects.py.
 // eslint-disable-next-line no-control-regex
@@ -105,7 +105,7 @@ export const projectSchema = z
   .object({
     name,
     git_connection_id: z.string().min(1, 'Pick a Git connection'),
-    azure_connection_id: z.string().min(1, 'Pick an Azure connection'),
+    board_connection_id: z.string().min(1, 'Pick a board connection'),
     branches: z
       .array(z.string().trim().max(255))
       .max(50, 'At most 50 branches')

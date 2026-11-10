@@ -10,6 +10,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 from app.api.v1.schemas.common import Name, OrganizationSummary, UserSummary
 from app.api.v1.schemas.runs import RunResponse
 from app.core.cron import InvalidCronError, validate_cron
+from app.db.models import BoardKind
 from app.integrations.git.hosts import GitHost
 from app.sync.parser import (
     DEFAULT_TICKET_PATTERN,
@@ -98,7 +99,7 @@ class ProjectCreate(BaseModel):
         description="Create it in this organization (any member), with its connections",
     )
     git_connection_id: uuid.UUID
-    azure_connection_id: uuid.UUID
+    board_connection_id: uuid.UUID
     branches: Branches = Field(
         default_factory=list, description="Empty means the remote's default branch only"
     )
@@ -124,7 +125,7 @@ class ProjectUpdate(BaseModel):
 
     name: Name | None = None
     git_connection_id: uuid.UUID | None = None
-    azure_connection_id: uuid.UUID | None = None
+    board_connection_id: uuid.UUID | None = None
     branches: Branches | None = None
     ticket_pattern: TicketPatternField | None = None
     comment_template: CommentTemplateField | None = None
@@ -145,13 +146,14 @@ class ProjectGitSummary(BaseModel):
     commit_url_pattern: str
 
 
-class ProjectAzureSummary(BaseModel):
-    """What everyone with access sees of the project's Azure connection: never its PAT."""
+class ProjectBoardSummary(BaseModel):
+    """What everyone with access sees of the project's board connection: never its secret."""
 
     id: uuid.UUID
     name: str
-    organization_url: str
-    azure_project: str
+    kind: BoardKind
+    url: str
+    scope: str
 
 
 ProjectRoleName = Literal["owner", "editor", "viewer"]
@@ -163,7 +165,7 @@ class ProjectResponse(BaseModel):
     id: uuid.UUID
     name: str
     git_connection_id: uuid.UUID
-    azure_connection_id: uuid.UUID
+    board_connection_id: uuid.UUID
     branches: list[str]
     ticket_pattern: str
     comment_template: str
@@ -192,7 +194,7 @@ class ProjectResponse(BaseModel):
         default=False, description="You see it only because you are an administrator"
     )
     git_connection: ProjectGitSummary | None = None
-    azure_connection: ProjectAzureSummary | None = None
+    board_connection: ProjectBoardSummary | None = None
 
 
 class OwnerChange(BaseModel):
@@ -223,7 +225,7 @@ class PatternTestRequest(BaseModel):
 
 
 class PatternSampleResult(BaseModel):
-    ids: list[int]
+    ids: list[str]
     error: str | None = None
 
 

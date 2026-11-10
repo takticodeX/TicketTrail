@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { commitUrl, isRunActive, runDuration, workItemUrl } from './runs';
+import { workItemUrl } from './boards';
+import { commitUrl, isRunActive, runDuration } from './runs';
 
 describe('runDuration', () => {
   it('formats seconds and minutes', () => {
@@ -22,7 +23,7 @@ it('knows which runs are still in progress', () => {
 });
 
 it('links work items to Azure Boards', () => {
-  expect(workItemUrl({ organization_url: 'https://dev.azure.com/acme', azure_project: 'Web App' }, 12)).toBe(
+  expect(workItemUrl({ kind: 'azure', url: 'https://dev.azure.com/acme', scope: 'Web App' }, '12')).toBe(
     'https://dev.azure.com/acme/Web%20App/_workitems/edit/12',
   );
 });

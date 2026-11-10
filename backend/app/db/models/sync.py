@@ -92,7 +92,8 @@ class SyncRunItem(TimestampedModel):
     # a run writes them all in one transaction.
     position: Mapped[int]
     commit_sha: Mapped[str] = mapped_column(String(40))
-    work_item_id: Mapped[int | None]
+    # Text: Planka's card IDs don't fit an integer column, nor a JavaScript number.
+    work_item_id: Mapped[str | None] = mapped_column(String(64))
     action: Mapped[str] = mapped_column(String(32))
     detail: Mapped[str | None] = mapped_column(Text)
     # Not in the spec's key columns: shown in the item list without opening Git.
@@ -126,8 +127,8 @@ class PostedComment(TimestampedModel):
 
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     commit_sha: Mapped[str] = mapped_column(String(40))
-    work_item_id: Mapped[int]
-    azure_comment_id: Mapped[int | None]
+    work_item_id: Mapped[str] = mapped_column(String(64))
+    comment_id: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16), default=CommentStatus.PENDING)
     posted_at: Mapped[datetime | None]
 
@@ -155,7 +156,7 @@ class CommitLink(TimestampedModel):
 
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     commit_sha: Mapped[str] = mapped_column(String(40))
-    work_item_id: Mapped[int]
+    work_item_id: Mapped[str] = mapped_column(String(64))
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
@@ -173,7 +174,7 @@ class CommitExclusion(TimestampedModel):
 
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     commit_sha: Mapped[str] = mapped_column(String(40))
-    work_item_id: Mapped[int]
+    work_item_id: Mapped[str] = mapped_column(String(64))
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )

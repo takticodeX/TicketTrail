@@ -13,7 +13,7 @@ import { NotFoundPage } from './pages/NotFoundPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { RunDetailPage } from './pages/RunDetailPage';
-import { AzureConnectionsPage } from './pages/settings/AzureConnectionsPage';
+import { BoardConnectionsPage } from './pages/settings/BoardConnectionsPage';
 import { GitConnectionsPage } from './pages/settings/GitConnectionsPage';
 import { OrganizationPage } from './pages/settings/OrganizationPage';
 import { OrganizationsPage } from './pages/settings/OrganizationsPage';
@@ -60,7 +60,9 @@ export function AppRoutes() {
           <Route path="projects/new" element={<ProjectWizardPage />} />
           <Route path="projects/:projectId" element={<ProjectWizardPage />} />
           <Route path="git" element={<GitConnectionsPage />} />
-          <Route path="azure" element={<AzureConnectionsPage />} />
+          <Route path="boards" element={<BoardConnectionsPage />} />
+          {/* The page's address before Planka boards. */}
+          <Route path="azure" element={<Navigate to="/settings/boards" replace />} />
           <Route path="organizations" element={<OrganizationsPage />} />
           <Route path="organizations/:organizationId" element={<OrganizationPage />} />
           <Route path="profile" element={<ProfilePage />} />

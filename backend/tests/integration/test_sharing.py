@@ -121,11 +121,12 @@ def test_shared_project_shows_in_the_recipients_list(
     assert seen["role"] == "viewer"
     assert seen["owner"] == {"id": owner.id, "display_name": "Olivia", "email": owner.email}
     assert seen["git_connection"]["name"] == "App repo"
-    assert seen["azure_connection"] == {
-        "id": project["azure_connection_id"],
+    assert seen["board_connection"] == {
+        "id": project["board_connection_id"],
         "name": "Acme board",
-        "organization_url": "https://dev.azure.com/acme",
-        "azure_project": "proj",
+        "kind": "azure",
+        "url": "https://dev.azure.com/acme",
+        "scope": "proj",
     }
     assert GIT_TOKEN not in str(page) and AZURE_PAT not in str(page)
 
@@ -155,7 +156,7 @@ def test_recipient_does_not_get_the_owners_connections(
     client: TestClient, viewer: Person, editor: Person, project: dict[str, Any]
 ) -> None:
     for who in (viewer, editor):
-        for path in ("git-connections", "azure-connections"):
+        for path in ("git-connections", "board-connections"):
             assert client.get(f"{API}/{path}", headers=who.headers).json()["total"] == 0
         response = client.get(
             f"{API}/git-connections/{project['git_connection_id']}", headers=who.headers
@@ -212,7 +213,7 @@ def test_viewer_reads_the_project_and_its_runs(
         headers=viewer.headers,
         json={"samples": ["fix AB#7"]},
     )
-    assert tested.json()["results"][0]["ids"] == [7]
+    assert tested.json()["results"][0]["ids"] == ["7"]
 
 
 def test_viewer_can_start_a_dry_run_but_not_a_real_sync(
@@ -309,7 +310,7 @@ def test_editor_cannot_change_the_connections(
         headers=editor.headers,
         json={
             "git_connection_id": project["git_connection_id"],
-            "azure_connection_id": project["azure_connection_id"],
+            "board_connection_id": project["board_connection_id"],
             "include_merge_commits": True,
         },
     )
@@ -319,14 +320,14 @@ def test_editor_cannot_change_the_connections(
 def test_owner_can_still_change_the_connections(
     client: TestClient, owner: Person, project: dict[str, Any]
 ) -> None:
-    other = create(client, "azure-connections", owner.headers, azure_payload(name="Other board"))
+    other = create(client, "board-connections", owner.headers, azure_payload(name="Other board"))
     response = client.patch(
         f"{API}/projects/{project['id']}",
         headers=owner.headers,
-        json={"azure_connection_id": other["id"]},
+        json={"board_connection_id": other["id"]},
     )
     assert response.status_code == 200
-    assert response.json()["azure_connection"]["name"] == "Other board"
+    assert response.json()["board_connection"]["name"] == "Other board"
 
 
 def test_editor_rename_is_checked_against_the_owners_names(
@@ -337,7 +338,7 @@ def test_editor_rename_is_checked_against_the_owners_names(
         owner.headers,
         name="Taken",
         git_connection_id=project["git_connection_id"],
-        azure_connection_id=project["azure_connection_id"],
+        board_connection_id=project["board_connection_id"],
     )
     response = client.patch(
         f"{API}/projects/{project['id']}", headers=editor.headers, json={"name": "Taken"}

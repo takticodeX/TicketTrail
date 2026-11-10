@@ -9,6 +9,7 @@ import { errorMessage } from '../api/errors';
 import { getRun, listRuns } from '../api/runs';
 import type { Project, SyncRun, SyncRunDetail } from '../api/types';
 import { runKeys, useStartSync } from '../hooks/useRuns';
+import { BOARD_LABELS } from '../lib/boards';
 import { formatDateTime } from '../lib/runs';
 
 function lastDryRun(runs: SyncRun[] | undefined): SyncRun | undefined {
@@ -55,7 +56,7 @@ function Summary({ project, dryRun }: { project: Project; dryRun: SyncRunDetail 
   );
 }
 
-/** "Sync now" posts to Azure DevOps, so it asks first, with the last dry run's numbers. */
+/** "Sync now" posts to the board, so it asks first, with the last dry run's numbers. */
 export function SyncNowButton({
   project,
   onDryRun,
@@ -97,7 +98,7 @@ export function SyncNowButton({
       setPreparing(false);
     }
     const id = modals.open({
-      title: 'Post comments to Azure DevOps?',
+      title: `Post comments to ${project.board_connection ? BOARD_LABELS[project.board_connection.kind] : 'the board'}?`,
       children: (
         <Stack>
           <Summary project={project} dryRun={detail} />

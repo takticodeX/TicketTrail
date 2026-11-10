@@ -18,7 +18,7 @@ const project = {
   branches: [],
   ...OWN_PROJECT,
   git_connection: { id: 'g1', name: 'Repo', repo_url: '', host: 'github', commit_url_pattern: '' },
-  azure_connection: { id: 'a1', name: 'Board', organization_url: 'https://dev.azure.com/acme', azure_project: 'Web' },
+  board_connection: { id: 'a1', name: 'Board', kind: 'azure', url: 'https://dev.azure.com/acme', scope: 'Web' },
 } as unknown as Project;
 
 const dryRun: SyncRunDetail = {
@@ -44,7 +44,7 @@ const row = (overrides: Partial<SyncRunItem>): SyncRunItem => ({
   commit_sha: 'abcdef1234567890abcdef1234567890abcdef12',
   commit_subject: 'Fix login AB#1',
   branch: 'main',
-  work_item_id: 1,
+  work_item_id: '1',
   action: 'would_post',
   detail: null,
   manual: false,
@@ -109,18 +109,18 @@ describe('reviewing a dry run', () => {
           ok: true,
           error: null,
           items: [
-            { id: 5, title: 'Checkout redesign', type: 'User Story', state: 'New', closed: false },
-            { id: 4, title: 'Old checkout', type: 'User Story', state: 'Closed', closed: true },
+            { id: '5', title: 'Checkout redesign', type: 'User Story', state: 'New', closed: false },
+            { id: '4', title: 'Old checkout', type: 'User Story', state: 'Closed', closed: true },
           ],
         }),
       'PUT /api/v1/runs/r1/items/i2/work-item': () =>
-        jsonResponse(row({ id: 'i2', work_item_id: 5, manual: true })),
+        jsonResponse(row({ id: 'i2', work_item_id: '5', manual: true })),
     });
     renderRun();
     await userEvent.click(await screen.findByRole('textbox', { name: 'Work item for 1234567' }));
     await userEvent.click(await screen.findByRole('option', { name: /#5 · Checkout redesign/ }));
     const put = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT');
-    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ work_item_id: 5 });
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ work_item_id: '5' });
   });
 
   it('offers changing the work item of a row that has one', async () => {

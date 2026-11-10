@@ -14,11 +14,11 @@ from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
 from app.api.deps import AdminUser, DbSession, PageDep
-from app.api.v1.azure_connections import to_response as azure_response
+from app.api.v1.board_connections import to_response as board_response
 from app.api.v1.git_connections import to_response as git_response
 from app.api.v1.owner_changes import transfer_responses
 from app.api.v1.schemas import (
-    AdminAzureConnectionResponse,
+    AdminBoardConnectionResponse,
     AdminGitConnectionResponse,
     AdminOrganizationResponse,
     AdminProjectResponse,
@@ -39,7 +39,7 @@ from app.api.v1.schemas import (
 from app.core.errors import AppError, field_error, not_found
 from app.db.models import (
     AuditEvent,
-    AzureConnection,
+    BoardConnection,
     GitConnection,
     Organization,
     OrganizationMember,
@@ -300,7 +300,7 @@ def promote_admin(
 
 
 def _connection_owners(
-    db: DbSession, connections: Sequence[GitConnection] | Sequence[AzureConnection], column: Any
+    db: DbSession, connections: Sequence[GitConnection] | Sequence[BoardConnection], column: Any
 ) -> tuple[dict[uuid.UUID, User], dict[uuid.UUID, Organization], dict[uuid.UUID, int]]:
     user_ids = {c.owner_id for c in connections if c.owner_id}
     org_ids = {c.organization_id for c in connections if c.organization_id}
@@ -313,7 +313,7 @@ def _connection_owners(
 
 
 def _owner_fields(
-    connection: GitConnection | AzureConnection,
+    connection: GitConnection | BoardConnection,
     users: dict[uuid.UUID, User],
     orgs: dict[uuid.UUID, Organization],
     usage: dict[uuid.UUID, int],
@@ -358,17 +358,17 @@ def list_all_git_connections(
     )
 
 
-@router.get("/azure-connections")
-def list_all_azure_connections(
+@router.get("/board-connections")
+def list_all_board_connections(
     admin: AdminUser, db: DbSession, page: PageDep
-) -> Page[AdminAzureConnectionResponse]:
-    """Every Azure connection with its owner. PATs stay write-only, also for admins."""
-    items, total = _all(db, AzureConnection, page)
-    users, orgs, usage = _connection_owners(db, items, Project.azure_connection_id)
+) -> Page[AdminBoardConnectionResponse]:
+    """Every board connection with its owner. Secrets stay write-only, also for admins."""
+    items, total = _all(db, BoardConnection, page)
+    users, orgs, usage = _connection_owners(db, items, Project.board_connection_id)
     return Page(
         items=[
-            AdminAzureConnectionResponse(
-                **azure_response(c).model_dump(), **_owner_fields(c, users, orgs, usage)
+            AdminBoardConnectionResponse(
+                **board_response(c).model_dump(), **_owner_fields(c, users, orgs, usage)
             )
             for c in items
         ],

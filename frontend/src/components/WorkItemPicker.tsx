@@ -16,7 +16,7 @@ export function WorkItemPicker({
   autoFocus = false,
 }: {
   projectId: string;
-  onPick: (workItemId: number) => void;
+  onPick: (workItemId: string) => void;
   label: string;
   autoFocus?: boolean;
 }) {
@@ -25,7 +25,7 @@ export function WorkItemPicker({
   const [query] = useDebouncedValue(search.trim(), 300);
   const result = useWorkItemSearch(projectId, query, opened);
   const options = result.data?.ok ? result.data.items : [];
-  const byId = new Map<string, WorkItemOption>(options.map((w) => [String(w.id), w]));
+  const byId = new Map<string, WorkItemOption>(options.map((w) => [w.id, w]));
 
   return (
     <Select
@@ -41,9 +41,9 @@ export function WorkItemPicker({
       onDropdownOpen={() => setOpened(true)}
       // The board does the searching: show what it found as it is.
       filter={({ options: all }) => all}
-      data={options.map((w) => ({ value: String(w.id), label: `#${w.id} · ${w.title}` }))}
+      data={options.map((w) => ({ value: w.id, label: `#${w.id} · ${w.title}` }))}
       value={null}
-      onChange={(value) => value && onPick(Number(value))}
+      onChange={(value) => value && onPick(value)}
       nothingFoundMessage={
         result.isFetching
           ? 'Searching…'

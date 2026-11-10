@@ -77,18 +77,18 @@ def test_search_lists_open_work_items_first(
     url = f"{API}/projects/{project['id']}/work-items"
     found = client.get(f"{url}?q=checkout", headers=headers).json()
     assert found["ok"] is True
-    assert [(w["id"], w["closed"]) for w in found["items"]] == [(5, False), (4, True)]
+    assert [(w["id"], w["closed"]) for w in found["items"]] == [("5", False), ("4", True)]
     assert found["items"][0] == {
-        "id": 5,
+        "id": "5",
         "title": "Checkout redesign",
         "type": "User Story",
         "state": "New",
         "closed": False,
     }
     by_id = client.get(f"{url}?q=%233", headers=headers).json()
-    assert [w["id"] for w in by_id["items"]] == [3]
+    assert [w["id"] for w in by_id["items"]] == ["3"]
     everything = client.get(url, headers=headers).json()
-    assert [w["id"] for w in everything["items"]] == [5, 3, 2, 1, 4]  # closed last
+    assert [w["id"] for w in everything["items"]] == ["5", "3", "2", "1", "4"]  # closed last
 
 
 def test_review_links_deselects_and_posts_exactly_the_selection(
@@ -117,11 +117,11 @@ def test_review_links_deselects_and_posts_exactly_the_selection(
     assert linked.status_code == 200, linked.text
     assert (linked.json()["action"], linked.json()["work_item_id"], linked.json()["manual"]) == (
         "would_post",
-        5,
+        "5",
         True,
     )
     fixed = put("Tidy up AB#99", 3).json()
-    assert (fixed["action"], fixed["work_item_id"]) == ("would_post", 3)
+    assert (fixed["action"], fixed["work_item_id"]) == ("would_post", "3")
     excluded = client.post(
         f"{API}/runs/{run_id}/items/{rows['Feature AB#2']['id']}/exclude", headers=headers
     )
@@ -199,7 +199,7 @@ def test_changing_a_linked_row_replaces_the_link(
     with db_engine.connect() as conn:
         links = conn.execute(text("SELECT work_item_id FROM commit_links")).scalars().all()
         exclusions = conn.execute(text("SELECT count(*) FROM commit_exclusions")).scalar()
-    assert (links, exclusions) == ([3], 0)
+    assert (links, exclusions) == (["3"], 0)
 
 
 def test_review_errors(

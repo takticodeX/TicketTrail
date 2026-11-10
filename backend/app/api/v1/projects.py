@@ -1,4 +1,4 @@
-"""Projects: one Git connection paired with one Azure board, plus the pattern tester.
+"""Projects: one Git connection paired with one board, plus the pattern tester.
 
 A project belongs to a user or to an organization (spec section 4, *Access rules*).
 """
@@ -22,7 +22,7 @@ from app.api.v1.schemas import (
     PatternSampleResult,
     PatternTestRequest,
     PatternTestResponse,
-    ProjectAzureSummary,
+    ProjectBoardSummary,
     ProjectCreate,
     ProjectGitSummary,
     ProjectResponse,
@@ -35,7 +35,7 @@ from app.config import Settings
 from app.core.cron import InvalidCronError, next_slot, validate_cron
 from app.core.errors import AppError, field_error
 from app.db.models import (
-    AzureConnection,
+    BoardConnection,
     GitConnection,
     OrganizationRole,
     Project,
@@ -44,7 +44,7 @@ from app.db.models import (
     User,
 )
 from app.db.repositories import (
-    AzureConnectionRepository,
+    BoardConnectionRepository,
     GitConnectionRepository,
     MemberRepository,
     ProjectAccessRepository,
@@ -74,7 +74,7 @@ def _whose(seen: SeenProject) -> str:
 
 
 def _check_connections(
-    db: DbSession, project: Project, git_connection_id: uuid.UUID, azure_connection_id: uuid.UUID
+    db: DbSession, project: Project, git_connection_id: uuid.UUID, board_connection_id: uuid.UUID
 ) -> None:
     """A project uses its own owner's connections only.
 
@@ -82,8 +82,8 @@ def _check_connections(
     """
     if GitConnectionRepository.owning(db, project).get(git_connection_id) is None:
         raise field_error("git_connection_id", "Git connection not found")
-    if AzureConnectionRepository.owning(db, project).get(azure_connection_id) is None:
-        raise field_error("azure_connection_id", "Azure connection not found")
+    if BoardConnectionRepository.owning(db, project).get(board_connection_id) is None:
+        raise field_error("board_connection_id", "Board connection not found")
 
 
 def _check_schedule(project: Project, settings: Settings) -> None:
@@ -112,14 +112,14 @@ def _share_counts(db: DbSession, project_ids: list[uuid.UUID]) -> dict[uuid.UUID
 
 def _connections(
     db: DbSession, projects: Sequence[Project]
-) -> tuple[dict[uuid.UUID, ProjectGitSummary], dict[uuid.UUID, ProjectAzureSummary]]:
+) -> tuple[dict[uuid.UUID, ProjectGitSummary], dict[uuid.UUID, ProjectBoardSummary]]:
     """The projects' connections, without secrets: shared users can't list the owner's."""
     gits = db.scalars(
         select(GitConnection).where(GitConnection.id.in_({p.git_connection_id for p in projects}))
     ).all()
-    azures = db.scalars(
-        select(AzureConnection).where(
-            AzureConnection.id.in_({p.azure_connection_id for p in projects})
+    boards = db.scalars(
+        select(BoardConnection).where(
+            BoardConnection.id.in_({p.board_connection_id for p in projects})
         )
     ).all()
     return (
@@ -134,13 +134,8 @@ def _connections(
             for c in gits
         },
         {
-            c.id: ProjectAzureSummary(
-                id=c.id,
-                name=c.name,
-                organization_url=c.organization_url,
-                azure_project=c.azure_project,
-            )
-            for c in azures
+            c.id: ProjectBoardSummary(id=c.id, name=c.name, kind=c.kind, url=c.url, scope=c.scope)
+            for c in boards
         },
     )
 
@@ -151,7 +146,7 @@ def _responses(db: DbSession, seen: Sequence[SeenProject]) -> list[ProjectRespon
     ids = [p.id for p in projects]
     summaries = project_summaries(db, ids)
     shares = _share_counts(db, ids)
-    gits, azures = _connections(db, projects)
+    gits, boards = _connections(db, projects)
     now = datetime.now(UTC)
     responses = []
     for item in seen:
@@ -177,7 +172,7 @@ def _responses(db: DbSession, seen: Sequence[SeenProject]) -> list[ProjectRespon
                     "shares": shares.get(project.id, 0),
                     "admin_access": item.via_admin,
                     "git_connection": gits.get(project.git_connection_id),
-                    "azure_connection": azures.get(project.azure_connection_id),
+                    "board_connection": boards.get(project.board_connection_id),
                 }
             )
         )
@@ -235,7 +230,7 @@ def create_project(
         owner_id=repo.owner_id,
         organization_id=repo.organization_id,
     )
-    _check_connections(db, project, body.git_connection_id, body.azure_connection_id)
+    _check_connections(db, project, body.git_connection_id, body.board_connection_id)
     _check_schedule(project, settings)
     _arm_schedule(project)
     repo.add(project)
@@ -275,7 +270,7 @@ def update_project(
     changes_connections = body.git_connection_id not in (
         None,
         project.git_connection_id,
-    ) or body.azure_connection_id not in (None, project.azure_connection_id)
+    ) or body.board_connection_id not in (None, project.board_connection_id)
     if changes_connections and seen.role is not ProjectRole.OWNER:
         raise insufficient_role(ProjectRole.OWNER)
     # Names are unique per owner.
@@ -291,7 +286,7 @@ def update_project(
         setattr(project, field, value)
 
     if changes_connections:
-        _check_connections(db, project, project.git_connection_id, project.azure_connection_id)
+        _check_connections(db, project, project.git_connection_id, project.board_connection_id)
     _check_schedule(project, settings)
     if (project.schedule_cron, project.schedule_enabled) != schedule_before:
         _arm_schedule(project)  # the scheduler reads it at the next minute: no restart

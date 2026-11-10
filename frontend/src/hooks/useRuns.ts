@@ -92,7 +92,7 @@ function useReviewMutation<T, R>(runId: string, mutationFn: (args: T) => Promise
 }
 
 export const useSetItemWorkItem = (runId: string) =>
-  useReviewMutation(runId, ({ itemId, workItemId }: { itemId: string; workItemId: number }) =>
+  useReviewMutation(runId, ({ itemId, workItemId }: { itemId: string; workItemId: string }) =>
     api.setItemWorkItem(runId, itemId, workItemId),
   );
 

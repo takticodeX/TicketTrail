@@ -26,7 +26,7 @@ def alice_resources(client: TestClient) -> dict[str, Any]:
 
 def _endpoints(project: dict[str, Any]) -> list[tuple[str, str, dict[str, Any] | None]]:
     git = f"/api/v1/git-connections/{project['git_connection_id']}"
-    azure = f"/api/v1/azure-connections/{project['azure_connection_id']}"
+    azure = f"/api/v1/board-connections/{project['board_connection_id']}"
     proj = f"/api/v1/projects/{project['id']}"
     return [
         ("GET", git, None),
@@ -73,7 +73,7 @@ def test_alices_resources_are_untouched(
 
 def test_lists_only_show_own_resources(client: TestClient, alice_resources: dict[str, Any]) -> None:
     bob = signed_in(client, "bob@example.com")
-    for path in ("git-connections", "azure-connections", "projects"):
+    for path in ("git-connections", "board-connections", "projects"):
         page = client.get(f"/api/v1/{path}", headers=bob).json()
         assert page == {"items": [], "total": 0, "page": 1, "page_size": 25}
 
@@ -84,16 +84,16 @@ def test_cannot_build_a_project_on_someone_elses_connections(
     bob = signed_in(client, "bob@example.com")
     project = alice_resources["project"]
     own_git = client.post("/api/v1/git-connections", headers=bob, json=git_payload()).json()
-    own_azure = client.post("/api/v1/azure-connections", headers=bob, json=azure_payload()).json()
+    own_azure = client.post("/api/v1/board-connections", headers=bob, json=azure_payload()).json()
 
     for git_id, azure_id, field in [
         (project["git_connection_id"], own_azure["id"], "git_connection_id"),
-        (own_git["id"], project["azure_connection_id"], "azure_connection_id"),
+        (own_git["id"], project["board_connection_id"], "board_connection_id"),
     ]:
         response = client.post(
             "/api/v1/projects",
             headers=bob,
-            json={"name": "Sneaky", "git_connection_id": git_id, "azure_connection_id": azure_id},
+            json={"name": "Sneaky", "git_connection_id": git_id, "board_connection_id": azure_id},
         )
         assert response.status_code == 422
         assert response.json()["error"]["details"]["errors"][0]["loc"] == ["body", field]
@@ -104,7 +104,7 @@ def test_cannot_build_a_project_on_someone_elses_connections(
         json={
             "name": "Mine",
             "git_connection_id": own_git["id"],
-            "azure_connection_id": own_azure["id"],
+            "board_connection_id": own_azure["id"],
         },
     ).json()
     response = client.patch(
@@ -122,10 +122,10 @@ def test_no_response_ever_contains_a_secret(
     project = alice_resources["project"]
     paths = [
         "/api/v1/git-connections",
-        "/api/v1/azure-connections",
+        "/api/v1/board-connections",
         "/api/v1/projects",
         f"/api/v1/git-connections/{project['git_connection_id']}",
-        f"/api/v1/azure-connections/{project['azure_connection_id']}",
+        f"/api/v1/board-connections/{project['board_connection_id']}",
         f"/api/v1/projects/{project['id']}",
     ]
     for path in paths:

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { toFormValues } from '../pages/settings/projectForm';
 import {
-  azureConnectionSchema,
+  boardConnectionSchema,
   gitConnectionSchema,
   httpsUrlError,
   passwordSchema,
@@ -70,17 +70,17 @@ describe('gitConnectionSchema', () => {
   });
 });
 
-describe('azureConnectionSchema', () => {
-  const azure = { name: 'Board', organization_url: 'https://dev.azure.com/acme', azure_project: 'p', pat: 'x' };
+describe('boardConnectionSchema', () => {
+  const azure = { name: 'Board', url: 'https://dev.azure.com/acme', scope: 'p', secret: 'x' };
 
   it('needs a PAT unless one is saved', () => {
-    expect(azureConnectionSchema({ hasSavedSecret: false }).safeParse({ ...azure, pat: '' }).success).toBe(false);
-    expect(azureConnectionSchema({ hasSavedSecret: true }).safeParse({ ...azure, pat: '' }).success).toBe(true);
+    expect(boardConnectionSchema({ hasSavedSecret: false }).safeParse({ ...azure, secret: '' }).success).toBe(false);
+    expect(boardConnectionSchema({ hasSavedSecret: true }).safeParse({ ...azure, secret: '' }).success).toBe(true);
   });
 });
 
 describe('projectSchema', () => {
-  const valid = { ...toFormValues(undefined), name: 'P', git_connection_id: 'g', azure_connection_id: 'a' };
+  const valid = { ...toFormValues(undefined), name: 'P', git_connection_id: 'g', board_connection_id: 'a' };
 
   it('accepts the defaults', () => {
     expect(projectSchema.safeParse(valid).success).toBe(true);

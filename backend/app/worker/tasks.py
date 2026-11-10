@@ -9,7 +9,7 @@ from app.db.repositories import close_stale_runs
 from app.sync.engine import run_sync, stale_after
 from app.worker import task_names
 from app.worker.celery_app import celery_app
-from app.worker.connection_checks import run_azure_connection_check, run_git_connection_check
+from app.worker.connection_checks import run_board_connection_check, run_git_connection_check
 from app.worker.context import get_worker_context
 from app.worker.runner import CeleryTaskRunner
 from app.worker.scheduler import dispatch_due_schedules
@@ -53,10 +53,9 @@ def dispatch_schedules() -> int:
     return len(dispatch_due_schedules(get_worker_context(), CeleryTaskRunner(celery_app)))
 
 
-@celery_app.task(name=task_names.TEST_AZURE_CONNECTION)
-def check_azure_connection(connection_id: str, owner_id: str | None = None) -> dict[str, Any]:
-    """owner_id is ignored: kept so messages queued by an older API still run."""
-    return run_azure_connection_check(get_worker_context(), uuid.UUID(connection_id))
+@celery_app.task(name=task_names.TEST_BOARD_CONNECTION)
+def check_board_connection(connection_id: str) -> dict[str, Any]:
+    return run_board_connection_check(get_worker_context(), uuid.UUID(connection_id))
 
 
 @celery_app.task(name=task_names.SEARCH_WORK_ITEMS)

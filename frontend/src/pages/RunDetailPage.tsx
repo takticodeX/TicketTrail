@@ -39,6 +39,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { useProject } from '../hooks/useSettings';
 import { canEdit, canManageRun } from '../lib/access';
+import { BOARD_LABELS, workItemUrl } from '../lib/boards';
 import {
   ACTION_COLORS,
   ACTION_LABELS,
@@ -47,7 +48,6 @@ import {
   formatDateTime,
   isRunActive,
   runDuration,
-  workItemUrl,
 } from '../lib/runs';
 
 const PAGE_SIZE = 50;
@@ -124,7 +124,8 @@ export function RunDetailPage() {
   }
 
   const gitConnection = project.data?.git_connection;
-  const azureConnection = project.data?.azure_connection;
+  const boardConnection = project.data?.board_connection;
+  const boardLabel = boardConnection ? BOARD_LABELS[boardConnection.kind] : 'the board';
   const manageable = project.data ? canManageRun(project.data, run.data, user?.id) : false;
   const totalPages = items.data ? Math.max(1, Math.ceil(items.data.total / PAGE_SIZE)) : 1;
   const failed = run.data.status === 'failed';
@@ -138,7 +139,7 @@ export function RunDetailPage() {
   const selectedCount = run.data.counts_by_action.would_post ?? 0;
   const showError = (error: unknown) => notifications.show({ color: 'red', message: errorMessage(error) });
 
-  const pick = (item: SyncRunItem, workItemId: number) =>
+  const pick = (item: SyncRunItem, workItemId: string) =>
     setWorkItem.mutate(
       { itemId: item.id, workItemId },
       { onSuccess: () => setEditing(null), onError: showError },
@@ -149,7 +150,7 @@ export function RunDetailPage() {
       title: 'Post the selected commits?',
       children: (
         <Text size="sm">
-          {selectedCount} {selectedCount === 1 ? 'comment is' : 'comments are'} posted to Azure DevOps, exactly as
+          {selectedCount} {selectedCount === 1 ? 'comment is' : 'comments are'} posted to {boardLabel}, exactly as
           selected here. Deselected rows are never posted, by this or any later run. Nothing is ever posted twice.
         </Text>
       ),
@@ -165,7 +166,7 @@ export function RunDetailPage() {
     confirmDelete({
       title: run.data.dry_run ? 'Delete dry run' : 'Delete run',
       message:
-        'Remove this run and its commit list from the history? Nothing changes in Azure DevOps, ' +
+        `Remove this run and its commit list from the history? Nothing changes in ${boardLabel}, ` +
         'and comments already posted are never posted again.',
       onConfirm: () =>
         remove.mutate(runId, {
@@ -362,9 +363,9 @@ export function RunDetailPage() {
                             <Group gap={6} wrap="nowrap">
                               {item.work_item_id === null ? (
                                 !picking && '—'
-                              ) : azureConnection ? (
+                              ) : boardConnection ? (
                                 <Anchor
-                                  href={workItemUrl(azureConnection, item.work_item_id)}
+                                  href={workItemUrl(boardConnection, item.work_item_id)}
                                   target="_blank"
                                   rel="noreferrer"
                                 >

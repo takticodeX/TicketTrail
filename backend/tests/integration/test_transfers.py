@@ -123,7 +123,7 @@ def test_transfer_everything_when_a_colleague_leaves(
 
     assert names(client, anna, "projects") == ["Billing"]
     assert names(client, anna, "git-connections") == ["App repo", "Spare repo"]
-    assert names(client, anna, "azure-connections") == ["Acme board"]
+    assert names(client, anna, "board-connections") == ["Acme board"]
     # Secrets moved as they were: still encrypted, and still there.
     with db_engine.connect() as conn:
         secrets_after = (
@@ -169,7 +169,7 @@ def test_connections_still_used_by_the_previous_owner_are_copied(
         marco.headers,
         name="Billing v2",
         git_connection_id=first["git_connection_id"],
-        azure_connection_id=first["azure_connection_id"],
+        board_connection_id=first["board_connection_id"],
     )
     transfer = transfer_project(client, admin, first["id"], anna).json()
     assert (transfer["connections_moved"], transfer["connections_copied"]) == (0, 2)
@@ -221,7 +221,7 @@ def test_transfers_are_recorded(
     client: TestClient, admin: Person, marco: Person, anna: Person
 ) -> None:
     project = create_project(client, marco.headers, name="Billing")
-    create(client, "azure-connections", marco.headers, azure_payload(name="Spare board"))
+    create(client, "board-connections", marco.headers, azure_payload(name="Spare board"))
     transfer_project(client, admin, project["id"], anna)
     transfer_all(client, admin, marco, anna)
     page = client.get(f"{API}/admin/transfers", headers=admin.headers).json()

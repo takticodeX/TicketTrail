@@ -15,7 +15,7 @@ from app.db.repositories.organizations import (
     owned_counts,
 )
 from app.db.repositories.owned import (
-    AzureConnectionRepository,
+    BoardConnectionRepository,
     GitConnectionRepository,
     OwnedRepository,
     ProjectRepository,
@@ -33,7 +33,7 @@ from app.db.repositories.sync import (
 from app.db.repositories.users import UserRepository
 
 __all__ = [
-    "AzureConnectionRepository",
+    "BoardConnectionRepository",
     "CursorRepository",
     "GitConnectionRepository",
     "MemberRepository",

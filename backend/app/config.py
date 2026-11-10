@@ -4,7 +4,7 @@ import logging
 from functools import lru_cache
 
 from cryptography.fernet import Fernet
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_DATABASE_URL = "postgresql+psycopg://tt:tt@db:5432/tickettrail"
@@ -24,7 +24,15 @@ class Settings(BaseSettings):
     allow_private_hosts: bool = False
     git_timeout: int = Field(default=300, gt=0)
     min_schedule_minutes: int = Field(default=5, ge=1)
-    azure_max_concurrency: int = Field(default=5, ge=1)
+    # Concurrent requests per board server (Azure organization, Planka server).
+    # TT_AZURE_MAX_CONCURRENCY is the name it had before Planka boards.
+    board_max_concurrency: int = Field(
+        default=5,
+        ge=1,
+        validation_alias=AliasChoices(
+            "board_max_concurrency", "TT_BOARD_MAX_CONCURRENCY", "TT_AZURE_MAX_CONCURRENCY"
+        ),
+    )
     log_level: str = "INFO"
     public_url: str = "http://localhost:8080"
 

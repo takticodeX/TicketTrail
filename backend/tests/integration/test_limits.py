@@ -38,7 +38,7 @@ def test_never_more_than_the_limit_at_once(redis: Redis) -> None:
 def test_slots_are_shared_per_organization(redis: Redis) -> None:
     first = RedisSlotLimiter.for_organization(redis, "https://dev.azure.com/Shared/", 1)
     other_org = RedisSlotLimiter.for_organization(redis, "https://dev.azure.com/other", 1)
-    key = "tt:azure:slots:https://dev.azure.com/shared"
+    key = "tt:board:slots:https://dev.azure.com/shared"
     with first.slot():
         with other_org.slot():  # another organization has its own slots
             pass

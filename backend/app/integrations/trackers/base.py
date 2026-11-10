@@ -1,4 +1,8 @@
-"""The interface every work-item tracker implements. Azure Boards is the only one in v1."""
+"""The interface every work-item tracker implements: Azure Boards and Planka.
+
+Work item and comment IDs are strings: Azure's are small integers, Planka's are
+too large for a JavaScript number.
+"""
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -23,13 +27,13 @@ class TrackerTransientError(TrackerError):
 
 @dataclass(frozen=True)
 class TrackerComment:
-    id: int
+    id: str
     text: str
 
 
 @dataclass(frozen=True)
 class TrackerWorkItem:
-    id: int
+    id: str
     title: str
     type: str
     state: str
@@ -37,19 +41,23 @@ class TrackerWorkItem:
 
 
 class WorkItemTracker(Protocol):
+    def __enter__(self) -> "WorkItemTracker": ...
+
+    def __exit__(self, *_: object) -> None: ...
+
     def test_connection(self) -> str:
-        """Check credentials and project access; return the project's display name."""
+        """Check credentials and access; return the project's or board's display name."""
         ...
 
-    def existing_work_items(self, ids: Iterable[int]) -> set[int]:
+    def existing_work_items(self, ids: Iterable[str]) -> set[str]:
         """The subset of `ids` that exist."""
         ...
 
-    def add_comment(self, work_item_id: int, text: str) -> int:
+    def add_comment(self, work_item_id: str, text: str) -> str:
         """Post a Markdown comment; return its ID."""
         ...
 
-    def list_comments(self, work_item_id: int) -> list[TrackerComment]: ...
+    def list_comments(self, work_item_id: str) -> list[TrackerComment]: ...
 
     def search_work_items(self, text: str, *, limit: int) -> list[TrackerWorkItem]:
         """Work items whose title contains `text` (or with that ID), open ones first."""

@@ -23,7 +23,7 @@ const base: Project = {
   id: 'p1',
   name: 'Web app',
   git_connection_id: 'g1',
-  azure_connection_id: 'a1',
+  board_connection_id: 'a1',
   branches: [],
   ticket_pattern: 'AB#(\\d+)',
   comment_template: '{subject} tt:{sha}',
@@ -45,11 +45,11 @@ const base: Project = {
     host: 'github',
     commit_url_pattern: 'https://github.com/acme/app/commit/{sha}',
   },
-  azure_connection: {
+  board_connection: {
     id: 'a1',
     name: 'Olivia board',
-    organization_url: 'https://dev.azure.com/acme',
-    azure_project: 'Web',
+    kind: 'azure', url: 'https://dev.azure.com/acme',
+    scope: 'Web',
   },
 };
 const sharedAs = (role: 'viewer' | 'editor'): Project => ({ ...base, role, owner: olivia });
@@ -166,7 +166,7 @@ describe('a project shared with you', () => {
     mockFetch({
       'GET /api/v1/projects/p1': () => jsonResponse(sharedAs('editor')),
       'GET /api/v1/git-connections?page_size=100': () => page([]),
-      'GET /api/v1/azure-connections?page_size=100': () => page([]),
+      'GET /api/v1/board-connections?page_size=100': () => page([]),
     });
     renderAt('/settings/projects/p1');
     const select = await screen.findByRole('textbox', { name: 'Git connection' });

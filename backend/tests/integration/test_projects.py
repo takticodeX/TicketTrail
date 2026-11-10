@@ -29,7 +29,7 @@ def headers(client: TestClient) -> dict[str, str]:
 def connections(client: TestClient, headers: dict[str, str]) -> dict[str, str]:
     return {
         "git_connection_id": create(client, "git-connections", headers, git_payload())["id"],
-        "azure_connection_id": create(client, "azure-connections", headers, azure_payload())["id"],
+        "board_connection_id": create(client, "board-connections", headers, azure_payload())["id"],
     }
 
 
@@ -131,11 +131,11 @@ def test_minimum_interval_comes_from_settings(app_factory: Any) -> None:
 
 def create_project_response(client: TestClient, headers: dict[str, str], **body: Any) -> Any:
     git = create(client, "git-connections", headers, git_payload())["id"]
-    azure = create(client, "azure-connections", headers, azure_payload())["id"]
+    azure = create(client, "board-connections", headers, azure_payload())["id"]
     return client.post(
         URL,
         headers=headers,
-        json={"name": "P", "git_connection_id": git, "azure_connection_id": azure, **body},
+        json={"name": "P", "git_connection_id": git, "board_connection_id": azure, **body},
     )
 
 
@@ -248,9 +248,9 @@ def test_pattern_tester_before_saving(client: TestClient, headers: dict[str, str
     assert response.json() == {
         "pattern": r"(?:fixes|refs)\s+#(\d+)",
         "results": [
-            {"ids": [12, 13], "error": None},
+            {"ids": ["12", "13"], "error": None},
             {"ids": [], "error": None},
-            {"ids": [12], "error": None},
+            {"ids": ["12"], "error": None},
         ],
     }
 
@@ -277,7 +277,7 @@ def test_pattern_tester_reports_timeouts_per_sample(
     ).json()
     assert body["results"][0]["ids"] == []
     assert "too long" in body["results"][0]["error"]
-    assert body["results"][1] == {"ids": [5], "error": None}
+    assert body["results"][1] == {"ids": ["5"], "error": None}
 
 
 def test_pattern_tester_limits_samples(client: TestClient, headers: dict[str, str]) -> None:
@@ -299,14 +299,14 @@ def test_project_pattern_tester_uses_saved_pattern(
         json={"samples": ["PROJ-4 AB#5"]},
     ).json()
     assert body["pattern"] == r"PROJ-(\d+)"
-    assert body["results"] == [{"ids": [4], "error": None}]
+    assert body["results"] == [{"ids": ["4"], "error": None}]
 
     override = client.post(
         f"{URL}/{project['id']}/test-pattern",
         headers=headers,
         json={"pattern": DEFAULT_TICKET_PATTERN, "samples": ["PROJ-4 AB#5"]},
     ).json()
-    assert override["results"] == [{"ids": [5], "error": None}]
+    assert override["results"] == [{"ids": ["5"], "error": None}]
 
 
 def test_pattern_tester_requires_authentication(app: FastAPI) -> None:

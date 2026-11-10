@@ -33,6 +33,7 @@ import { useClearDryRuns, useDeleteRun, useRuns } from '../hooks/useRuns';
 import { useProject } from '../hooks/useSettings';
 import { useRemoveShare } from '../hooks/useSharing';
 import { canEdit, canManageRun, isOwner } from '../lib/access';
+import { BOARD_LABELS } from '../lib/boards';
 import { formatDateTime, isRunActive, runDuration } from '../lib/runs';
 import { formatRunTime } from '../lib/schedule';
 
@@ -70,7 +71,8 @@ export function ProjectDetailPage() {
   }
 
   const gitConnection = project.data.git_connection;
-  const azureConnection = project.data.azure_connection;
+  const boardConnection = project.data.board_connection;
+  const boardLabel = boardConnection ? BOARD_LABELS[boardConnection.kind] : 'the board';
   const editable = canEdit(project.data);
   // A personal project needs an organization to go to (administrators can always pick someone).
   const canMove =
@@ -80,7 +82,7 @@ export function ProjectDetailPage() {
     confirmDelete({
       title: run.dry_run ? 'Delete dry run' : 'Delete run',
       message:
-        'Remove this run and its commit list from the history? Nothing changes in Azure DevOps, ' +
+        `Remove this run and its commit list from the history? Nothing changes in ${boardLabel}, ` +
         'and comments already posted are never posted again.',
       onConfirm: () =>
         deleteRun.mutate(run.id, {
@@ -138,7 +140,7 @@ export function ProjectDetailPage() {
             {' · '}
             {project.data.branches.length > 0 ? project.data.branches.join(', ') : 'default branch'}
             {' → '}
-            {azureConnection ? `${azureConnection.name} (${azureConnection.azure_project})` : '…'}
+            {boardConnection ? `${boardConnection.name} (${boardConnection.scope})` : '…'}
           </Text>
           <SharingLine project={project.data} />
         </div>
@@ -185,7 +187,7 @@ export function ProjectDetailPage() {
         </Alert>
       )}
       <Text size="sm" c="dimmed">
-        A dry run lists which comments would be posted, without changing anything in Azure DevOps.
+        A dry run lists which comments would be posted, without changing anything in {boardLabel}.
         {editable ? ' Sync now posts them.' : ' Only an editor can post them.'}
         {project.data.next_run_at &&
           ` Next scheduled run: ${formatRunTime(new Date(project.data.next_run_at), timeZone)}.`}

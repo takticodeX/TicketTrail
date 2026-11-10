@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from app.worker import connection_checks
+from app.worker import boards
 from tests.integration.helpers import (
     AZURE_PAT,
     assert_validation_error,
@@ -17,7 +17,7 @@ from tests.integration.helpers import (
 
 pytestmark = pytest.mark.integration
 
-URL = "/api/v1/azure-connections"
+URL = "/api/v1/board-connections"
 AZURE_PROJECT_API = "https://dev.azure.com/acme/_apis/projects/proj"
 
 
@@ -28,24 +28,25 @@ def headers(client: TestClient) -> dict[str, str]:
 
 @pytest.fixture
 def no_dns(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(connection_checks, "check_public_host", lambda *_, **__: None)
+    monkeypatch.setattr(boards, "check_public_host", lambda *_, **__: None)
 
 
 def test_create_never_returns_the_pat(client: TestClient, headers: dict[str, str]) -> None:
-    body = create(client, "azure-connections", headers, azure_payload())
-    assert body["organization_url"] == "https://dev.azure.com/acme"
-    assert body["azure_project"] == "proj"
+    body = create(client, "board-connections", headers, azure_payload())
+    assert body["kind"] == "azure"
+    assert body["url"] == "https://dev.azure.com/acme"
+    assert body["scope"] == "proj"
     assert body["has_secret"] is True
-    assert "pat" not in body and "pat_enc" not in body
+    assert "pat" not in body and "secret_enc" not in body
     assert AZURE_PAT not in str(body)
 
 
 def test_pat_is_stored_encrypted(
     app: FastAPI, client: TestClient, headers: dict[str, str], db_engine: Engine
 ) -> None:
-    create(client, "azure-connections", headers, azure_payload())
+    create(client, "board-connections", headers, azure_payload())
     with db_engine.connect() as conn:
-        stored = conn.execute(text("SELECT pat_enc FROM azure_connections")).scalar_one()
+        stored = conn.execute(text("SELECT secret_enc FROM board_connections")).scalar_one()
     assert AZURE_PAT not in stored
     assert app.state.secret_box.decrypt(stored) == AZURE_PAT
 
@@ -53,20 +54,21 @@ def test_pat_is_stored_encrypted(
 def test_trailing_slash_is_removed(client: TestClient, headers: dict[str, str]) -> None:
     body = create(
         client,
-        "azure-connections",
+        "board-connections",
         headers,
-        azure_payload(organization_url="https://dev.azure.com/acme/"),
+        azure_payload(url="https://dev.azure.com/acme/"),
     )
-    assert body["organization_url"] == "https://dev.azure.com/acme"
+    assert body["url"] == "https://dev.azure.com/acme"
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("organization_url", "http://dev.azure.com/acme"),
-        ("organization_url", "https://user:pw@dev.azure.com/acme"),
-        ("azure_project", ""),
-        ("pat", ""),
+        ("url", "http://dev.azure.com/acme"),
+        ("url", "https://user:pw@dev.azure.com/acme"),
+        ("scope", ""),
+        ("secret", ""),
+        ("kind", "jira"),
         ("name", "  "),
     ],
 )
@@ -78,28 +80,28 @@ def test_validation(client: TestClient, headers: dict[str, str], field: str, val
 def test_update_keeps_pat_when_empty(
     app: FastAPI, client: TestClient, headers: dict[str, str], db_engine: Engine
 ) -> None:
-    connection = create(client, "azure-connections", headers, azure_payload())
+    connection = create(client, "board-connections", headers, azure_payload())
     body = client.patch(
-        f"{URL}/{connection['id']}", headers=headers, json={"azure_project": "other", "pat": ""}
+        f"{URL}/{connection['id']}", headers=headers, json={"scope": "other", "secret": ""}
     ).json()
-    assert body["azure_project"] == "other"
+    assert body["scope"] == "other"
     with db_engine.connect() as conn:
-        stored = conn.execute(text("SELECT pat_enc FROM azure_connections")).scalar_one()
+        stored = conn.execute(text("SELECT secret_enc FROM board_connections")).scalar_one()
     assert app.state.secret_box.decrypt(stored) == AZURE_PAT
 
 
 def test_update_replaces_pat(
     app: FastAPI, client: TestClient, headers: dict[str, str], db_engine: Engine
 ) -> None:
-    connection = create(client, "azure-connections", headers, azure_payload())
-    client.patch(f"{URL}/{connection['id']}", headers=headers, json={"pat": "new-pat"})
+    connection = create(client, "board-connections", headers, azure_payload())
+    client.patch(f"{URL}/{connection['id']}", headers=headers, json={"secret": "new-pat"})
     with db_engine.connect() as conn:
-        stored = conn.execute(text("SELECT pat_enc FROM azure_connections")).scalar_one()
+        stored = conn.execute(text("SELECT secret_enc FROM board_connections")).scalar_one()
     assert app.state.secret_box.decrypt(stored) == "new-pat"
 
 
 def test_list_and_delete(client: TestClient, headers: dict[str, str]) -> None:
-    connection = create(client, "azure-connections", headers, azure_payload())
+    connection = create(client, "board-connections", headers, azure_payload())
     assert client.get(URL, headers=headers).json()["total"] == 1
     assert client.delete(f"{URL}/{connection['id']}", headers=headers).status_code == 204
     assert client.get(URL, headers=headers).json()["total"] == 0
@@ -109,7 +111,7 @@ def test_delete_is_refused_while_a_project_uses_it(
     client: TestClient, headers: dict[str, str]
 ) -> None:
     project = create_project(client, headers)
-    response = client.delete(f"{URL}/{project['azure_connection_id']}", headers=headers)
+    response = client.delete(f"{URL}/{project['board_connection_id']}", headers=headers)
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "connection_in_use"
 
@@ -121,11 +123,11 @@ def test_test_connection_finds_the_project(
     route = respx.get(AZURE_PROJECT_API).mock(
         return_value=httpx.Response(200, json={"id": "1", "name": "proj"})
     )
-    connection = create(client, "azure-connections", headers, azure_payload())
+    connection = create(client, "board-connections", headers, azure_payload())
 
     response = client.post(f"{URL}/{connection['id']}/test", headers=headers)
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "project_name": "proj", "error": None}
+    assert response.json() == {"ok": True, "scope_name": "proj", "error": None}
     assert route.called
     saved = client.get(f"{URL}/{connection['id']}", headers=headers).json()
     assert saved["last_test_ok"] is True
@@ -136,7 +138,7 @@ def test_test_connection_with_bad_pat(
     client: TestClient, headers: dict[str, str], no_dns: None
 ) -> None:
     respx.get(AZURE_PROJECT_API).mock(return_value=httpx.Response(401))
-    connection = create(client, "azure-connections", headers, azure_payload())
+    connection = create(client, "board-connections", headers, azure_payload())
 
     body = client.post(f"{URL}/{connection['id']}/test", headers=headers).json()
     assert body["ok"] is False
@@ -148,9 +150,9 @@ def test_test_connection_with_bad_pat(
 def test_test_refuses_private_hosts(client: TestClient, headers: dict[str, str]) -> None:
     connection = create(
         client,
-        "azure-connections",
+        "board-connections",
         headers,
-        azure_payload(organization_url="https://192.168.1.20/tfs/DefaultCollection"),
+        azure_payload(url="https://192.168.1.20/tfs/DefaultCollection"),
     )
     body = client.post(f"{URL}/{connection['id']}/test", headers=headers).json()
     assert body["ok"] is False

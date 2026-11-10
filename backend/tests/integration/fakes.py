@@ -4,14 +4,14 @@ from typing import Any
 
 from app.sync.engine import run_sync
 from app.worker import task_names
-from app.worker.connection_checks import run_azure_connection_check, run_git_connection_check
+from app.worker.connection_checks import run_board_connection_check, run_git_connection_check
 from app.worker.context import WorkerContext
 from app.worker.runner import WorkerUnavailableError
 from app.worker.work_items import run_work_item_search
 
 _TASKS: dict[str, Callable[[WorkerContext, uuid.UUID], dict[str, Any]]] = {
     task_names.TEST_GIT_CONNECTION: run_git_connection_check,
-    task_names.TEST_AZURE_CONNECTION: run_azure_connection_check,
+    task_names.TEST_BOARD_CONNECTION: run_board_connection_check,
 }
 
 

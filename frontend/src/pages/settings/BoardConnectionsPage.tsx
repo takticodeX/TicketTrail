@@ -3,28 +3,29 @@ import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 
 import { deleteErrorMessage } from '../../api/errors';
-import type { AzureConnection } from '../../api/types';
+import type { BoardConnection } from '../../api/types';
 import { confirmDelete } from '../../components/confirmDelete';
-import { AzureConnectionForm } from '../../components/settings/AzureConnectionForm';
+import { BoardConnectionForm } from '../../components/settings/BoardConnectionForm';
 import { SettingsList } from '../../components/settings/SettingsList';
 import { TestStatus } from '../../components/TestStatus';
-import { useAzureConnections, useDeleteAzureConnection } from '../../hooks/useSettings';
+import { useBoardConnections, useDeleteBoardConnection } from '../../hooks/useSettings';
+import { BOARD_LABELS } from '../../lib/boards';
 
-export function AzureConnectionsPage() {
-  const query = useAzureConnections();
-  const remove = useDeleteAzureConnection();
-  const [editing, setEditing] = useState<AzureConnection | 'new' | null>(null);
+export function BoardConnectionsPage() {
+  const query = useBoardConnections();
+  const remove = useDeleteBoardConnection();
+  const [editing, setEditing] = useState<BoardConnection | 'new' | null>(null);
   // A new key each time the drawer opens; saving keeps the same form (and its test result).
   const [formKey, setFormKey] = useState(0);
-  const open = (target: AzureConnection | 'new') => {
+  const open = (target: BoardConnection | 'new') => {
     setEditing(target);
     setFormKey((key) => key + 1);
   };
 
-  const onDelete = (connection: AzureConnection) =>
+  const onDelete = (connection: BoardConnection) =>
     confirmDelete({
-      title: 'Delete Azure connection',
-      message: `Delete "${connection.name}"? Its saved PAT is deleted too.`,
+      title: 'Delete board connection',
+      message: `Delete "${connection.name}"? Its saved token is deleted too.`,
       onConfirm: () =>
         remove.mutate(connection.id, {
           onSuccess: () => notifications.show({ color: 'teal', message: `Deleted "${connection.name}".` }),
@@ -35,17 +36,18 @@ export function AzureConnectionsPage() {
   return (
     <>
       <SettingsList
-        title="Azure connections"
-        description="Azure DevOps boards that receive the commit comments."
+        title="Board connections"
+        description="The boards whose work items receive the commit comments."
         query={query}
-        addLabel="Add Azure connection"
+        addLabel="Add board connection"
         onAdd={() => open('new')}
-        emptyText="No Azure connections yet. Add the board whose work items should get the comments."
+        emptyText="No board connections yet. Add the board whose work items should get the comments."
         head={
           <Table.Tr>
             <Table.Th>Name</Table.Th>
-            <Table.Th>Organization</Table.Th>
-            <Table.Th>Project</Table.Th>
+            <Table.Th>Board</Table.Th>
+            <Table.Th>URL</Table.Th>
+            <Table.Th>Project or board</Table.Th>
             <Table.Th>Status</Table.Th>
             <Table.Th aria-label="Actions" />
           </Table.Tr>
@@ -57,12 +59,13 @@ export function AzureConnectionsPage() {
                 {connection.name}
               </Anchor>
             </Table.Td>
+            <Table.Td>{BOARD_LABELS[connection.kind]}</Table.Td>
             <Table.Td>
-              <Text size="sm" truncate maw={300} title={connection.organization_url}>
-                {connection.organization_url}
+              <Text size="sm" truncate maw={300} title={connection.url}>
+                {connection.url}
               </Text>
             </Table.Td>
-            <Table.Td>{connection.azure_project}</Table.Td>
+            <Table.Td>{connection.scope}</Table.Td>
             <Table.Td>
               <TestStatus ok={connection.last_test_ok} at={connection.last_test_at} />
             </Table.Td>
@@ -84,10 +87,10 @@ export function AzureConnectionsPage() {
         onClose={() => setEditing(null)}
         position="right"
         size="lg"
-        title={editing === 'new' ? 'New Azure connection' : 'Edit Azure connection'}
+        title={editing === 'new' ? 'New board connection' : 'Edit board connection'}
       >
         {editing !== null && (
-          <AzureConnectionForm
+          <BoardConnectionForm
             key={formKey}
             connection={editing === 'new' ? null : editing}
             onSaved={setEditing}

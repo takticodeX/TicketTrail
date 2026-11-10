@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     admin,
     auth,
-    azure_connections,
+    board_connections,
     git_connections,
     health,
     me,
@@ -46,7 +46,7 @@ _CONNECTION_ERRORS = {
     503: {"model": ErrorResponse, "description": "The worker did not answer a test"},
 }
 api_router.include_router(git_connections.router, responses=_CONNECTION_ERRORS)
-api_router.include_router(azure_connections.router, responses=_CONNECTION_ERRORS)
+api_router.include_router(board_connections.router, responses=_CONNECTION_ERRORS)
 api_router.include_router(projects.router, responses=_RESOURCE_ERRORS)
 api_router.include_router(
     organizations.router,

@@ -1,4 +1,4 @@
-import type { AzureConnection, ItemAction, RunStatus, SyncRun } from '../api/types';
+import type { ItemAction, RunStatus, SyncRun } from '../api/types';
 
 export const STATUS_LABELS: Record<RunStatus, string> = {
   queued: 'Queued',
@@ -67,10 +67,6 @@ export function runDuration(run: Pick<SyncRun, 'started_at' | 'finished_at'>): s
   );
   if (seconds < 60) return `${seconds} s`;
   return `${Math.floor(seconds / 60)} min ${String(seconds % 60).padStart(2, '0')} s`;
-}
-
-export function workItemUrl(connection: Pick<AzureConnection, 'organization_url' | 'azure_project'>, id: number): string {
-  return `${connection.organization_url}/${encodeURIComponent(connection.azure_project)}/_workitems/edit/${id}`;
 }
 
 /** The commit link from the Git connection's pattern, or null for unknown hosts. */

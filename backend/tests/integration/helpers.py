@@ -65,9 +65,9 @@ def git_payload(**overrides: Any) -> dict[str, Any]:
 def azure_payload(**overrides: Any) -> dict[str, Any]:
     return {
         "name": "Acme board",
-        "organization_url": "https://dev.azure.com/acme",
-        "azure_project": "proj",
-        "pat": AZURE_PAT,
+        "url": "https://dev.azure.com/acme",
+        "scope": "proj",
+        "secret": AZURE_PAT,
         **overrides,
     }
 
@@ -83,8 +83,8 @@ def create_project(client: TestClient, headers: dict[str, str], **overrides: Any
     body: dict[str, Any] = {"name": "Main project", **overrides}
     if "git_connection_id" not in body:
         body["git_connection_id"] = create(client, "git-connections", headers, git_payload())["id"]
-    if "azure_connection_id" not in body:
-        body["azure_connection_id"] = create(client, "azure-connections", headers, azure_payload())[
+    if "board_connection_id" not in body:
+        body["board_connection_id"] = create(client, "board-connections", headers, azure_payload())[
             "id"
         ]
     project: dict[str, Any] = create(client, "projects", headers, body)

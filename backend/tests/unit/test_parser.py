@@ -8,26 +8,26 @@ from app.sync.parser import (
 )
 
 
-def ids(pattern: str, message: str) -> list[int]:
+def ids(pattern: str, message: str) -> list[str]:
     return compile_ticket_pattern(pattern).extract(message)
 
 
 def test_default_pattern() -> None:
     assert DEFAULT_TICKET_PATTERN == r"AB#(\d+)"
-    assert ids(DEFAULT_TICKET_PATTERN, "Fix login AB#123") == [123]
+    assert ids(DEFAULT_TICKET_PATTERN, "Fix login AB#123") == ["123"]
 
 
 def test_matching_is_case_insensitive() -> None:
-    assert ids(DEFAULT_TICKET_PATTERN, "fix ab#7") == [7]
+    assert ids(DEFAULT_TICKET_PATTERN, "fix ab#7") == ["7"]
 
 
 def test_searches_subject_and_body() -> None:
     message = "Refactor parser AB#1\n\nAlso touches AB#2 and AB#3."
-    assert ids(DEFAULT_TICKET_PATTERN, message) == [1, 2, 3]
+    assert ids(DEFAULT_TICKET_PATTERN, message) == ["1", "2", "3"]
 
 
 def test_ids_are_unique_in_first_seen_order() -> None:
-    assert ids(DEFAULT_TICKET_PATTERN, "AB#5 AB#2 AB#5 ab#2") == [5, 2]
+    assert ids(DEFAULT_TICKET_PATTERN, "AB#5 AB#2 AB#5 ab#2") == ["5", "2"]
 
 
 def test_no_match() -> None:
@@ -35,7 +35,7 @@ def test_no_match() -> None:
 
 
 def test_zero_is_not_a_work_item() -> None:
-    assert ids(DEFAULT_TICKET_PATTERN, "AB#0 AB#00 AB#9") == [9]
+    assert ids(DEFAULT_TICKET_PATTERN, "AB#0 AB#00 AB#9") == ["9"]
 
 
 @pytest.mark.parametrize(
@@ -54,7 +54,7 @@ def test_zero_is_not_a_work_item() -> None:
 def test_spec_examples_and_other_valid_patterns(
     pattern: str, message: str, expected: list[int]
 ) -> None:
-    assert ids(pattern, message) == expected
+    assert ids(pattern, message) == [str(i) for i in expected]
 
 
 @pytest.mark.parametrize(
@@ -77,7 +77,7 @@ def test_invalid_patterns(pattern: str, reason: str) -> None:
 
 
 def test_named_id_group_may_sit_next_to_other_groups() -> None:
-    assert ids(r"(\w+)-(?P<id>\d+)", "PROJ-12") == [12]
+    assert ids(r"(\w+)-(?P<id>\d+)", "PROJ-12") == ["12"]
 
 
 # Catastrophic backtracking that the `regex` engine does not optimise away.
@@ -93,3 +93,7 @@ def test_slow_matching_times_out_after_100_ms() -> None:
 
 def test_unicode_digits_are_ignored() -> None:
     assert ids(r"AB#(\d+)", "AB#١٢") == []
+
+
+def test_leading_zeros_are_dropped() -> None:
+    assert ids(DEFAULT_TICKET_PATTERN, "AB#007 AB#7") == ["7"]

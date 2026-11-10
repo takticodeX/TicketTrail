@@ -101,7 +101,7 @@ class PostedCommentRepository:
         self.session = session
         self.project_id = project_id
 
-    def for_commits(self, shas: Iterable[str]) -> dict[tuple[str, int], PostedComment]:
+    def for_commits(self, shas: Iterable[str]) -> dict[tuple[str, str], PostedComment]:
         rows = self.session.scalars(
             select(PostedComment).where(
                 PostedComment.project_id == self.project_id,

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.crypto import SecretBox, SecretDecryptionError
-from app.db.models import AzureConnection, GitConnection
+from app.db.models import BoardConnection, GitConnection
 from app.db.session import create_db_engine, create_session_factory
 
 logger = logging.getLogger("tickettrail.manage")
@@ -32,12 +32,12 @@ def rotate_keys(db: Session, box: SecretBox) -> tuple[int, list[str]]:
             rotated += 1
         except SecretDecryptionError:
             failed.append(f"git connection {git.id} ({git.name})")
-    for azure in db.scalars(select(AzureConnection)):
+    for board in db.scalars(select(BoardConnection)):
         try:
-            azure.pat_enc = box.rotate(azure.pat_enc)
+            board.secret_enc = box.rotate(board.secret_enc)
             rotated += 1
         except SecretDecryptionError:
-            failed.append(f"azure connection {azure.id} ({azure.name})")
+            failed.append(f"board connection {board.id} ({board.name})")
     db.commit()
     return rotated, failed
 

@@ -1,6 +1,6 @@
 """All ORM models. Importing this package registers them on Base.metadata."""
 
-from app.db.models.connections import AzureConnection, GitAuthType, GitConnection
+from app.db.models.connections import BoardConnection, BoardKind, GitAuthType, GitConnection
 from app.db.models.organization import Organization, OrganizationMember, OrganizationRole
 from app.db.models.project import Project
 from app.db.models.refresh_token import RefreshToken
@@ -30,7 +30,8 @@ __all__ = [
     "ACTIVE_STATUSES",
     "SHARE_ROLES",
     "AuditEvent",
-    "AzureConnection",
+    "BoardConnection",
+    "BoardKind",
     "CommentStatus",
     "CommitExclusion",
     "CommitLink",

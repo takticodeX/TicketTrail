@@ -81,7 +81,7 @@ def search_work_items(
 ) -> WorkItemSearchResult:
     """Work items of the project's board for the picker: open first, closed last."""
     project_for(db, user, project_id, ProjectRole.EDITOR)
-    db.close()  # don't hold a database connection while the worker asks Azure
+    db.close()  # don't hold a database connection while the worker asks the board
     try:
         result = runner.run(
             task_names.SEARCH_WORK_ITEMS, [str(project_id), q], timeout=TEST_WAIT_SECONDS

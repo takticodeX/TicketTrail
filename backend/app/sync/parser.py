@@ -87,15 +87,15 @@ class TicketPattern:
     compiled: "regex.Pattern[str]"
     group: int | str
 
-    def extract(self, message: str, *, timeout: float = MATCH_TIMEOUT_SECONDS) -> list[int]:
-        """Unique work-item IDs in the order they first appear."""
-        ids: list[int] = []
+    def extract(self, message: str, *, timeout: float = MATCH_TIMEOUT_SECONDS) -> list[str]:
+        """Unique work-item IDs in the order they first appear, without leading zeros."""
+        ids: list[str] = []
         try:
             for match in self.compiled.finditer(message, timeout=timeout):
                 value = match.group(self.group)
                 if value and value.isascii() and value.isdigit():
-                    work_item_id = int(value)
-                    if work_item_id > 0 and work_item_id not in ids:
+                    work_item_id = value.lstrip("0")
+                    if work_item_id and work_item_id not in ids:
                         ids.append(work_item_id)
         except TimeoutError as exc:
             raise PatternTimeoutError("pattern took too long on this message") from exc
